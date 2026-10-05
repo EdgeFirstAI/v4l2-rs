@@ -1,0 +1,43 @@
+# RELEASE BUILD. This is step 1 of 3:
+#
+#   release.yml      push to release/*.*.*  -> build every artifact  (this file)
+#   tag-release.yml  release PR merged      -> annotated vX.Y.Z tag
+#   publish.yml      push of a v*.*.* tag   -> publish what was built
+#
+# It runs on `push` to the release branch rather than on `pull_request` for two
+# reasons. A pull_request run builds a merge-preview commit that exists nowhere
+# in history, so publish.yml could never bind its artifacts to the tag; a push
+# run builds the branch head, which is the commit the release PR merges. And
+# confining the expensive build to release branches keeps it off every ordinary
+# push, which is the whole point of the tiered model.
+#
+# Accepting the release PR is the gate. It cannot merge until this is green,
+# and green here means every artifact the release will ship already exists.
+
+name: Release Build
+
+on:
+  push:
+    branches: ['release/*.*.*']   # release/X.Y.Z and release/X.Y.Z-rcN
+  workflow_dispatch:              # rebuild a release branch on demand
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: true        # a fixup commit supersedes the build it interrupts
+
+jobs:
+  # Version consistency across Cargo.toml / pyproject.toml / VERSION against
+  # the branch name, plus the changelog section publish.yml will need, plus the
+  # full SBOM. Fails the release PR rather than the tag.
+  verify:
+    uses: EdgeFirstAI/.github/.github/workflows/release-rust.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    with:
+      sbom: true
+      # Package NAMES the release ships, in dependency order. The list is
+      # recorded beside the .crate files and publish.yml refuses to publish a
+      # different one, so the value here and in publish.yml cannot drift.
+      # `cargo publish --no-verify` on the tag is only safe because packaging
+      # was exercised here. Set `package-crates: false` for a repository that
+      # publishes no crate.
+      crate-packages: "edgefirst-v4l2"
+    secrets: inherit

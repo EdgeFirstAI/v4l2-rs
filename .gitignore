@@ -1,0 +1,8 @@
+/target
+/sbom
+sbom.json
+*.cdx.json
+*.profraw
+*.profdata
+venv/
+.vscode

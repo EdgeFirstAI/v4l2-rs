@@ -1,0 +1,33 @@
+name: Publish
+
+on:
+  push:
+    tags: ['v*.*.*']              # vX.Y.Z and vX.Y.Z-rcN
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to rehearse, e.g. v1.2.0 (publishes nothing)'
+        required: true
+        type: string
+
+concurrency:
+  group: publish-${{ github.ref }}
+  # No cancel-in-progress. A half-finished publish is not a state anything can
+  # recover from: crates.io and PyPI uploads are irreversible.
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    uses: EdgeFirstAI/.github/.github/workflows/publish-rust.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    with:
+      tag: ${{ inputs.tag }}
+      build-workflow: release.yml
+      publish-crates: true
+      # Dependency order. crates.io is the one target where a partial publish
+      # cannot be undone by re-running the job.
+      crate-packages: "edgefirst-v4l2"
+    permissions:
+      contents: write             # create the GitHub Release
+      actions: read               # read the release.yml run and its artifacts
+      id-token: write             # OIDC trusted publishing
+    secrets: inherit
