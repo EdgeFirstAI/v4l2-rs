@@ -26,8 +26,9 @@ concurrency:
 # workflow.
 
 jobs:
+  # Runs on draft pull requests too: PRs stay in draft until ci-gate is
+  # green, as in the camera repository.
   changes:
-    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
