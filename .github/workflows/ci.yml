@@ -80,9 +80,6 @@ jobs:
     uses: EdgeFirstAI/.github/.github/workflows/rust-quick.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
     with:
       python: false
-      # The repository-setup crate has no tests yet; drop --no-tests once the
-      # UAPI module brings the first ones.
-      nextest-args: --workspace --locked --no-tests=warn
 
   full:
     needs: changes

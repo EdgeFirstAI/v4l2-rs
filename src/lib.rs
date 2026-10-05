@@ -12,3 +12,8 @@
 //!
 //! On platforms other than Linux the crate compiles to nothing, so it can be
 //! an unconditional dependency of portable crates.
+
+#[cfg(target_os = "linux")]
+pub mod ioctl;
+#[cfg(target_os = "linux")]
+pub mod uapi;
