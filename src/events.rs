@@ -1,13 +1,24 @@
 // SPDX-FileCopyrightText: Copyright 2026 Au-Zone Technologies
 // SPDX-License-Identifier: Apache-2.0
 
-//! V4L2 events: subscription and a dequeue that never blocks.
+//! V4L2 events: subscription, waiting, and a dequeue that does not wait.
 //!
 //! On a descriptor opened without `O_NONBLOCK`, `VIDIOC_DQEVENT` sleeps until
 //! an event arrives, which can be forever (the i.MX `mxc-jpeg` decoder, with
 //! no source change pending). Every dequeue here first checks `POLLPRI` with
 //! a zero timeout, and [`drain`] stops at the first event that reports
-//! nothing else pending, so neither can hang, however the node was opened.
+//! nothing else pending.
+//!
+//! # Blocking
+//!
+//! On a descriptor opened with `O_NONBLOCK`, as
+//! [`Device::open`](crate::device::Device::open) does, [`dequeue`] and
+//! [`drain`] never block. On a blocking descriptor the `POLLPRI` check is a
+//! snapshot: they stay non-blocking only while nothing else dequeues events
+//! from the same open file. Another thread or process doing so between the
+//! check and `VIDIOC_DQEVENT` can take the last event and leave the ioctl
+//! asleep. Events belong to the open file, so serialise event handling for
+//! a shared blocking descriptor, or open it with `O_NONBLOCK`.
 
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::time::Duration;
@@ -154,15 +165,17 @@ pub fn wait(dev: impl AsFd, timeout: Option<Duration>) -> Result<bool> {
 }
 
 /// Dequeues the next pending event, or returns `None` when there is none.
-/// Never blocks.
+/// Does not wait for an event; see the [module documentation](self) for the
+/// one case where it can block.
 pub fn dequeue(dev: impl AsFd) -> Result<Option<Event>> {
     dequeue_fd(dev.as_fd())
 }
 
 /// Dequeues pending events until none is left, the last one dequeued
-/// reports nothing else pending, or `max` events have been read. Never
-/// blocks. Use it after a wait reports an event (`POLLPRI`), for example
-/// [`M2m::wait`](crate::m2m::M2m::wait).
+/// reports nothing else pending, or `max` events have been read. Does not
+/// wait for events; see the [module documentation](self) for the one case
+/// where it can block. Use it after a wait reports an event (`POLLPRI`), for
+/// example [`wait`] or [`M2m::wait`](crate::m2m::M2m::wait).
 pub fn drain(dev: impl AsFd, max: usize) -> Result<Vec<Event>> {
     let fd = dev.as_fd();
     let mut events = Vec::new();
