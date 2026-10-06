@@ -81,14 +81,15 @@ jobs:
     with:
       python: false
 
-  # Buffer-queue integration tests against the kernel's virtual drivers:
+  # Integration tests (queues, devices, controls, events) against the
+  # kernel's virtual drivers:
   # vivid (one single-planar and one multi-planar capture node) and vim2m
   # (memory-to-memory). The modules ship in linux-modules-extra for the
   # runner's kernel. When the archive has no such package (it has not caught
   # up with the runner image) the job warns and skips the tests; a failure to
   # install a package that exists fails the job.
   vivid:
-    name: V4L2 queues (vivid, vim2m)
+    name: V4L2 devices (vivid, vim2m)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
@@ -129,7 +130,7 @@ jobs:
           shared-key: vivid
           cache-on-failure: true
           cache-bin: false
-      - name: Queue tests
+      - name: Device tests
         if: steps.drivers.outputs.available == 'true'
         env:
           EDGEFIRST_V4L2_REQUIRE_VIVID: "1"

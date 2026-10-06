@@ -14,7 +14,13 @@
 //! an unconditional dependency of portable crates.
 
 #[cfg(target_os = "linux")]
+pub mod controls;
+#[cfg(target_os = "linux")]
+pub mod device;
+#[cfg(target_os = "linux")]
 mod error;
+#[cfg(target_os = "linux")]
+pub mod events;
 #[cfg(target_os = "linux")]
 pub mod ioctl;
 #[cfg(target_os = "linux")]

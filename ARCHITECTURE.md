@@ -31,6 +31,15 @@ Before this crate existed, the codec carried a private copy of the UAPI structs 
 - **Errors.** Every failure carries an `ErrorKind` (`Disconnected` for `ENODEV` or `POLLHUP`, `Unsupported` for `ENOTTY`, `Busy`, `InvalidArgument`, `InvalidState`, `EndOfStream` for an M2M drain), the operation, and the `errno`. `EINTR` is retried everywhere.
 - **Allocation.** `REQBUFS` always works. `CREATE_BUFS` is optional, because the i.MX 8M Plus ISP driver returns `ENOTTY` for it.
 
+## Devices, controls and events
+
+- **Capabilities.** `Capabilities::effective()` uses the node's `device_caps` when the driver reports them, because the device-wide `capabilities` list every node's abilities. i.MX capture nodes misreport otherwise. `capture_buf_type()` and `output_buf_type()` pick the single- or multi-planar type, covering M2M nodes too.
+- **Enumeration** lists `/dev/video*` by node number (`video2` before `video10`), opening each node only for `VIDIOC_QUERYCAP`. A node that cannot be opened is listed with its error, not dropped.
+- **Requests, not guarantees.** `set_format`, `set_frame_interval`, `set_selection` and `controls::set` all return what the driver applied: drivers adjust sizes, round frame intervals, and clamp control values to their range and step. `try_format` asks without changing anything.
+- **Control types.** Scalar controls are set as 32- or 64-bit values. Strings and array or compound controls (`V4L2_CTRL_FLAG_HAS_PAYLOAD`) pass a buffer of exactly `elem_size * elems` bytes. Menus are read with `VIDIOC_QUERYMENU`, and the indices a driver skips are left out. Drivers without `VIDIOC_QUERY_EXT_CTRL` fall back to `VIDIOC_QUERYCTRL`.
+- **Events never block.** Some drivers block in `VIDIOC_DQEVENT` when nothing is pending, even on a non-blocking descriptor; `mxc-jpeg` does. `events::dequeue` checks `POLLPRI` with a zero timeout first, and `events::drain` stops at the first event reporting nothing else pending, or at a caller-given maximum.
+- **Error kinds** extend to `PermissionDenied` (`EACCES`, `EPERM`: write-only or read-only controls). `Unsupported` also covers `ENODATA`, which drivers return for a selection target the current input does not support.
+
 ## Rules
 
 - **No EdgeFirst types.** Consumers translate buffers into tensors, images or anything else, so the crate can stay small and stable.

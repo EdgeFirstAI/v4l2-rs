@@ -17,13 +17,20 @@ pub enum ErrorKind {
     /// The device is gone (`ENODEV`, `ENXIO`, or `POLLHUP`), for example a
     /// USB camera that was unplugged. The file descriptor cannot recover.
     Disconnected,
-    /// The driver does not implement the request (`ENOTTY`), or does not
-    /// support the memory type or buffer type that was asked for.
+    /// The driver does not implement the request (`ENOTTY`), does not
+    /// support it for the current input or output (`ENODATA`, for example a
+    /// selection target), or does not support the memory type or buffer type
+    /// that was asked for.
     Unsupported,
     /// The queue is owned by another file handle or is streaming (`EBUSY`).
     Busy,
-    /// The driver rejected an argument (`EINVAL`).
+    /// The driver rejected an argument (`EINVAL`), or a value outside what
+    /// the control accepts (`ERANGE`).
     InvalidArgument,
+    /// The operation is not permitted: reading a write-only control,
+    /// setting a read-only one, or no access to the node (`EACCES`,
+    /// `EPERM`).
+    PermissionDenied,
     /// The call is not valid in the queue's current state: no buffers are
     /// allocated, a buffer is already queued, or the stream is not running.
     InvalidState,
@@ -48,9 +55,10 @@ impl Error {
     pub(crate) fn from_errno(op: &'static str, errno: Errno) -> Self {
         let kind = match errno {
             Errno::ENODEV | Errno::ENXIO => ErrorKind::Disconnected,
-            Errno::ENOTTY => ErrorKind::Unsupported,
+            Errno::ENOTTY | Errno::ENODATA => ErrorKind::Unsupported,
             Errno::EBUSY => ErrorKind::Busy,
-            Errno::EINVAL => ErrorKind::InvalidArgument,
+            Errno::EINVAL | Errno::ERANGE => ErrorKind::InvalidArgument,
+            Errno::EACCES | Errno::EPERM => ErrorKind::PermissionDenied,
             Errno::EPIPE => ErrorKind::EndOfStream,
             _ => ErrorKind::Io,
         };
@@ -104,6 +112,7 @@ impl fmt::Display for Error {
             ErrorKind::Unsupported => "not supported by the driver",
             ErrorKind::Busy => "device busy",
             ErrorKind::InvalidArgument => "invalid argument",
+            ErrorKind::PermissionDenied => "permission denied",
             ErrorKind::InvalidState => "invalid in the current queue state",
             ErrorKind::EndOfStream => "end of stream",
             ErrorKind::Io => "I/O error",
@@ -142,8 +151,11 @@ mod tests {
         assert_eq!(k(Errno::ENODEV), ErrorKind::Disconnected);
         assert_eq!(k(Errno::ENXIO), ErrorKind::Disconnected);
         assert_eq!(k(Errno::ENOTTY), ErrorKind::Unsupported);
+        assert_eq!(k(Errno::ENODATA), ErrorKind::Unsupported);
         assert_eq!(k(Errno::EBUSY), ErrorKind::Busy);
         assert_eq!(k(Errno::EINVAL), ErrorKind::InvalidArgument);
+        assert_eq!(k(Errno::ERANGE), ErrorKind::InvalidArgument);
+        assert_eq!(k(Errno::EACCES), ErrorKind::PermissionDenied);
         assert_eq!(k(Errno::EPIPE), ErrorKind::EndOfStream);
         assert_eq!(k(Errno::EIO), ErrorKind::Io);
     }
