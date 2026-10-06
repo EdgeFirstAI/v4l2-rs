@@ -22,9 +22,7 @@ jobs:
     with:
       tag: ${{ inputs.tag }}
       build-workflow: release.yml
-      # The first release is published to crates.io by hand so trusted
-      # publishing can be configured for the new crate.
-      publish-crates: false
+      publish-crates: true
       # Dependency order. crates.io is the one target where a partial publish
       # cannot be undone by re-running the job.
       crate-packages: "edgefirst-v4l2"
