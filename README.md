@@ -5,7 +5,7 @@ Video4Linux2 for Rust: the kernel UAPI definitions, ioctl wrappers, buffer queue
 - The **EdgeFirst Camera SDK** ([`edgefirst-camera`](https://github.com/EdgeFirstAI/camera)) uses it for capture.
 - The **EdgeFirst HAL codecs** ([`edgefirst-codec`](https://github.com/EdgeFirstAI/hal)) use it for memory-to-memory JPEG and H.264.
 
-> **Status:** in development. `uapi`, `ioctl`, `queue` and `m2m` are in place. `device`, `controls` and `events` follow.
+> **Status:** in development. Every module is in place; the API may still change before 1.0.
 
 ## Design
 
@@ -18,13 +18,21 @@ Video4Linux2 for Rust: the kernel UAPI definitions, ioctl wrappers, buffer queue
 
 | Module | Contents |
 |---|---|
-| `uapi` (available) | `#[repr(C)]` structs, constants and FourCCs, with size and offset checks |
-| `ioctl` (available) | `nix` bindings for every ioctl the crate uses |
-| `device` | Enumeration of `/dev/video*`, capabilities (honouring `V4L2_CAP_DEVICE_CAPS`), single- vs multi-planar detection |
-| `queue` (available) | Indexed buffer queues over MMAP, DMABUF and USERPTR, single- and multi-planar; RAII mmap; `EXPBUF`; `poll` with timeout; buffer flags and timestamp clock |
-| `controls` | Typed control query, get and set with ranges |
-| `events` | Bounded `VIDIOC_DQEVENT` drain |
-| `m2m` (available) | Output and capture queues of a memory-to-memory device, with one `poll` for both and for events |
+| `uapi` | `#[repr(C)]` structs, constants and FourCCs, with size and offset checks |
+| `ioctl` | `nix` bindings for every ioctl the crate uses |
+| `device` | Numeric-order enumeration of `/dev/video*`; capabilities honouring `V4L2_CAP_DEVICE_CAPS`, with the capture and output buffer types; formats, frame sizes and intervals; `G/S/TRY_FMT`; frame rate (`G/S_PARM`); crop and compose (`G/S_SELECTION`) |
+| `queue` | Indexed buffer queues over MMAP, DMABUF and USERPTR, single- and multi-planar; RAII mmap; `EXPBUF`; `poll` with timeout; buffer flags and timestamp clock |
+| `controls` | Control enumeration with ranges and menus; typed get and set, including 64-bit, string and array controls; returns the value the driver applied |
+| `events` | Subscription; dequeue and a bounded drain that never block; source-change and control payloads |
+| `m2m` | Output and capture queues of a memory-to-memory device, with one `poll` for both and for events |
+
+## Examples
+
+```sh
+cargo run --example v4l2-devices                                  # every node: capabilities, formats, sizes, rates
+cargo run --example v4l2-controls -- /dev/video0                  # controls, ranges, menus and current values
+cargo run --example v4l2-controls -- /dev/video0 brightness=128   # set, then show what the driver applied
+```
 
 ## License
 

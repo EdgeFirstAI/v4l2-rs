@@ -804,3 +804,362 @@ fn concurrent_stream_control_keeps_state_consistent() {
     }
     q.free().unwrap();
 }
+
+mod device_controls_events {
+    use super::*;
+    use edgefirst_v4l2::controls::{self, ControlInfo, ControlType, ControlValue};
+    use edgefirst_v4l2::device::{self, Fraction, FrameIntervals, FrameSizes};
+    use edgefirst_v4l2::events;
+
+    /// The crate's `Device` on the node the test holds locked.
+    fn open(locked: &Device) -> device::Device {
+        device::Device::open(&locked.path).unwrap()
+    }
+
+    #[test]
+    fn enumerate_finds_vivid_in_numeric_order() {
+        let Some((locked, _)) = vivid(false) else {
+            return;
+        };
+        let found = device::enumerate().unwrap();
+        let numbers: Vec<u32> = found
+            .iter()
+            .map(|d| {
+                d.path.file_name().unwrap().to_str().unwrap()["video".len()..]
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert!(numbers.windows(2).all(|w| w[0] < w[1]), "{numbers:?}");
+        let ours = found
+            .iter()
+            .find(|d| d.path.to_str() == Some(locked.path.as_str()))
+            .expect("the locked vivid node is listed");
+        let caps = ours.capabilities.as_ref().unwrap();
+        assert_eq!(caps.driver, "vivid");
+        assert!(caps.is_capture() && caps.has_streaming() && !caps.is_m2m());
+        assert_eq!(caps.capture_buf_type(), Some(BufType::VideoCapture));
+    }
+
+    #[test]
+    fn multi_planar_node_reports_mplane_type() {
+        let Some((locked, buf_type)) = vivid(true) else {
+            return;
+        };
+        let dev = open(&locked);
+        assert_eq!(dev.capabilities().capture_buf_type(), Some(buf_type));
+        assert!(!dev.formats(buf_type).unwrap().is_empty());
+    }
+
+    #[test]
+    fn formats_sizes_and_intervals() {
+        let Some((locked, buf_type)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let formats = dev.formats(buf_type).unwrap();
+        assert!(
+            formats
+                .iter()
+                .any(|f| f.fourcc == V4L2_PIX_FMT_YUYV && !f.is_compressed()),
+            "{formats:?}"
+        );
+        let size = match dev.frame_sizes(V4L2_PIX_FMT_YUYV).unwrap() {
+            FrameSizes::Discrete(sizes) => {
+                assert!(!sizes.is_empty());
+                sizes[0]
+            }
+            FrameSizes::Stepwise(r) | FrameSizes::Continuous(r) => {
+                assert!(r.min.width <= r.max.width && r.min.height <= r.max.height);
+                r.min
+            }
+        };
+        match dev.frame_intervals(V4L2_PIX_FMT_YUYV, size).unwrap() {
+            FrameIntervals::Discrete(list) => {
+                assert!(!list.is_empty());
+                assert!(list.iter().all(|f| f.fps().is_some()));
+            }
+            FrameIntervals::Stepwise { min, max, .. } | FrameIntervals::Continuous { min, max } => {
+                assert!(min.fps() >= max.fps());
+            }
+        }
+    }
+
+    #[test]
+    fn enumerating_an_unoffered_format_is_unsupported() {
+        let Some((locked, _)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let h264 = fourcc(b'H', b'2', b'6', b'4');
+        let e = dev.frame_sizes(h264).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::Unsupported, "{e}");
+        assert_eq!(e.errno(), Some(nix::errno::Errno::EINVAL));
+        let odd = device::Size {
+            width: 1234,
+            height: 567,
+        };
+        let e = dev.frame_intervals(V4L2_PIX_FMT_YUYV, odd).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::Unsupported, "{e}");
+    }
+
+    #[test]
+    fn set_format_reports_what_the_driver_applied() {
+        let Some((locked, buf_type)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let mut want = dev.format(buf_type).unwrap();
+        // SAFETY: the type selects the single-planar payload.
+        let pix = unsafe { want.pix() };
+        pix.width = 641;
+        pix.height = 479;
+        pix.pixelformat = V4L2_PIX_FMT_YUYV;
+        let mut tried = want;
+        dev.try_format(&mut tried).unwrap();
+        // SAFETY: as above.
+        let t = unsafe { tried.pix() };
+        assert_eq!(t.pixelformat, V4L2_PIX_FMT_YUYV);
+        assert!(t.bytesperline >= t.width * 2);
+        dev.set_format(&mut want).unwrap();
+        let mut now = dev.format(buf_type).unwrap();
+        // SAFETY: as above.
+        let (w, n) = (unsafe { *want.pix() }, unsafe { *now.pix() });
+        assert_eq!(
+            (w.width, w.height, w.sizeimage),
+            (n.width, n.height, n.sizeimage)
+        );
+    }
+
+    #[test]
+    fn frame_interval_round_trip() {
+        let Some((locked, buf_type)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let Some(current) = dev.frame_interval(buf_type).unwrap() else {
+            panic!("vivid supports V4L2_CAP_TIMEPERFRAME");
+        };
+        assert!(current.fps().is_some());
+        let applied = dev
+            .set_frame_interval(buf_type, Fraction::new(1, 15))
+            .unwrap();
+        assert_eq!(dev.frame_interval(buf_type).unwrap(), Some(applied));
+        dev.set_frame_interval(buf_type, current).unwrap();
+    }
+
+    #[test]
+    fn selection_where_supported() {
+        let Some((locked, buf_type)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        // Which targets a driver supports depends on the input; an
+        // unsupported one is reported as `Unsupported`, never as an I/O
+        // error.
+        let get = |target| match dev.selection(buf_type, target) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                assert!(
+                    matches!(
+                        e.kind(),
+                        ErrorKind::Unsupported | ErrorKind::InvalidArgument
+                    ),
+                    "{e}"
+                );
+                eprintln!("NOTE: selection target {target:#x} not supported here ({e})");
+                None
+            }
+        };
+        if let Some(bounds) = get(V4L2_SEL_TGT_CROP_BOUNDS) {
+            assert!(bounds.width > 0 && bounds.height > 0);
+        }
+        if let Some(crop) = get(V4L2_SEL_TGT_CROP) {
+            let applied = dev
+                .set_selection(buf_type, V4L2_SEL_TGT_CROP, crop, 0)
+                .unwrap();
+            assert_eq!(applied, crop);
+        }
+    }
+
+    fn writable(c: &ControlInfo) -> bool {
+        !(c.flags.is_read_only() || c.flags.is_disabled() || c.flags.is_write_only())
+    }
+
+    fn first(all: &[ControlInfo], f: impl Fn(&ControlInfo) -> bool) -> &ControlInfo {
+        all.iter()
+            .find(|c| f(c))
+            .expect("vivid exposes this kind of control")
+    }
+
+    #[test]
+    fn controls_enumerate_and_round_trip() {
+        let Some((locked, _)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let all = controls::query_all(&dev).unwrap();
+        assert!(all.windows(2).all(|w| w[0].id != w[1].id));
+        assert!(all.iter().any(|c| c.control_type == ControlType::CtrlClass));
+
+        // A standard integer control: set, clamp to the range, query by ID.
+        let b = first(&all, |c| c.id == V4L2_CID_BRIGHTNESS);
+        assert_eq!(&controls::query(&dev, b.id).unwrap(), b);
+        let mid = ((b.minimum + b.maximum) / 2) as i32;
+        assert_eq!(
+            controls::set(&dev, b, &ControlValue::Integer(mid)).unwrap(),
+            ControlValue::Integer(mid)
+        );
+        assert_eq!(controls::get(&dev, b).unwrap(), ControlValue::Integer(mid));
+        let over = controls::set(&dev, b, &ControlValue::Integer(b.maximum as i32 + 1000)).unwrap();
+        assert_eq!(
+            over,
+            ControlValue::Integer(b.maximum as i32),
+            "clamped to the maximum"
+        );
+
+        let i64c = first(&all, |c| {
+            c.control_type == ControlType::Integer64 && writable(c)
+        });
+        let v = i64c.minimum.max(-(1 << 40));
+        assert_eq!(
+            controls::set(&dev, i64c, &ControlValue::Integer64(v)).unwrap(),
+            ControlValue::Integer64(v)
+        );
+
+        let s = first(&all, |c| {
+            c.control_type == ControlType::String && writable(c)
+        });
+        let text: String = "edgefirst".chars().take(s.maximum as usize).collect();
+        controls::set(&dev, s, &ControlValue::String(text.clone())).unwrap();
+        assert_eq!(controls::get(&dev, s).unwrap(), ControlValue::String(text));
+
+        let menu = first(&all, |c| c.control_type == ControlType::Menu && writable(c));
+        assert!(!menu.menu.is_empty());
+        assert!(menu
+            .menu
+            .iter()
+            .all(|m| m.name.is_some() && m.value.is_none()));
+        let item = menu.menu.last().unwrap().index as i32;
+        assert_eq!(
+            controls::set(&dev, menu, &ControlValue::Integer(item)).unwrap(),
+            ControlValue::Integer(item)
+        );
+
+        let int_menu = first(&all, |c| c.control_type == ControlType::IntegerMenu);
+        assert!(!int_menu.menu.is_empty());
+        assert!(int_menu.menu.iter().all(|m| m.value.is_some()));
+
+        let array = first(&all, |c| {
+            c.control_type == ControlType::U8 && c.flags.has_payload() && c.elems > 1 && writable(c)
+        });
+        let n = (array.elem_size * array.elems) as usize;
+        let lo = array.minimum.max(0) as u8;
+        let pattern: Vec<u8> = (0..n).map(|i| lo.saturating_add((i % 7) as u8)).collect();
+        controls::set(&dev, array, &ControlValue::Payload(pattern.clone())).unwrap();
+        assert_eq!(
+            controls::get(&dev, array).unwrap(),
+            ControlValue::Payload(pattern)
+        );
+
+        match all
+            .iter()
+            .find(|c| c.flags.is_dynamic_array() && writable(c))
+        {
+            Some(dynamic) => {
+                assert_eq!(dynamic.control_type, ControlType::U32);
+                // Two in-range elements, each a native-endian u32.
+                let two: Vec<u8> = [dynamic.minimum, dynamic.maximum]
+                    .iter()
+                    .flat_map(|&v| (v as u32).to_ne_bytes())
+                    .collect();
+                assert!(dynamic.dims.first().is_some_and(|&max| max >= 2));
+                controls::set(&dev, dynamic, &ControlValue::Payload(two.clone())).unwrap();
+                assert_eq!(
+                    controls::get(&dev, dynamic).unwrap(),
+                    ControlValue::Payload(two),
+                    "get returns the current length, not the capacity"
+                );
+            }
+            None => eprintln!("NOTE: this vivid has no dynamic-array control"),
+        }
+
+        let button = first(&all, |c| c.control_type == ControlType::Button);
+        assert_eq!(
+            controls::get(&dev, button).unwrap_err().kind(),
+            ErrorKind::PermissionDenied,
+            "a button is write-only"
+        );
+        let ro = first(&all, |c| {
+            c.flags.is_read_only() && c.control_type == ControlType::Integer
+        });
+        assert_eq!(
+            controls::set(&dev, ro, &ControlValue::Integer(ro.minimum as i32))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::PermissionDenied
+        );
+
+        controls::set(&dev, b, &ControlValue::Integer(b.default_value as i32)).unwrap();
+    }
+
+    #[test]
+    fn control_events_are_delivered_and_drained() {
+        let Some((locked, _)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let b = controls::query(&dev, V4L2_CID_BRIGHTNESS).unwrap();
+        let start = ((b.minimum + b.maximum) / 2) as i32;
+        controls::set(&dev, &b, &ControlValue::Integer(start)).unwrap();
+
+        events::subscribe(&dev, V4L2_EVENT_CTRL, b.id, V4L2_EVENT_SUB_FL_SEND_INITIAL).unwrap();
+        let initial = events::dequeue(&dev)
+            .unwrap()
+            .expect("SEND_INITIAL queues an event");
+        assert_eq!(initial.kind(), V4L2_EVENT_CTRL);
+        assert_eq!(initial.id(), b.id);
+        assert_eq!(initial.control().unwrap().value, i64::from(start));
+        assert!(
+            events::dequeue(&dev).unwrap().is_none(),
+            "nothing else pending"
+        );
+
+        // A second handle changes the control, as another process would.
+        let other = open(&locked);
+        for v in [start + 1, start + 2] {
+            controls::set(&other, &b, &ControlValue::Integer(v)).unwrap();
+        }
+        let drained = events::drain(&dev, 16).unwrap();
+        assert!(!drained.is_empty());
+        let last = drained.last().unwrap().control().unwrap();
+        assert_ne!(last.changes & V4L2_EVENT_CTRL_CH_VALUE, 0);
+        assert_eq!(last.value, i64::from(start + 2));
+        assert_eq!(drained.last().unwrap().pending(), 0);
+        assert!(drained.iter().all(|e| e.timestamp() > Duration::ZERO));
+
+        events::unsubscribe(&dev, V4L2_EVENT_ALL, 0).unwrap();
+        controls::set(&other, &b, &ControlValue::Integer(start)).unwrap();
+        assert!(
+            events::dequeue(&dev).unwrap().is_none(),
+            "no events after unsubscribing"
+        );
+        controls::set(&dev, &b, &ControlValue::Integer(b.default_value as i32)).unwrap();
+    }
+
+    #[test]
+    fn queue_accepts_the_crate_device() {
+        let Some((locked, buf_type)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let mut q = Queue::new(&dev, buf_type).unwrap();
+        let granted = q.request(Memory::Mmap, 2).unwrap();
+        for i in 0..granted {
+            q.enqueue(i, &[Plane::mmap()], None).unwrap();
+        }
+        q.stream_on().unwrap();
+        next(&q);
+        q.free().unwrap();
+    }
+}

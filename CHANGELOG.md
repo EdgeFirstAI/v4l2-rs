@@ -8,11 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `device`: `enumerate` lists `/dev/video*` in numeric order with each node's capabilities. `Device` opens a node and provides capabilities (honouring `V4L2_CAP_DEVICE_CAPS`, with the capture and output buffer types), formats, frame sizes and intervals, `G/S/TRY_FMT`, frame rate through `G/S_PARM`, and `G/S_SELECTION`. Setters return what the driver applied (EDGEAI-1515).
+- `controls`: enumeration with `QUERY_EXT_CTRL` (falling back to `QUERYCTRL`) and `QUERYMENU`, and typed get and set through `G/S_EXT_CTRLS`, including 64-bit, string and array or compound controls. `set` returns the value the driver applied (EDGEAI-1515).
+- `events`: subscribe and unsubscribe, plus a dequeue and a bounded drain that never block, with source-change and control payloads (EDGEAI-1515).
+- `uapi`: `v4l2_event_ctrl` with layout checks, `v4l2_event::ctrl`, and the `V4L2_EVENT_CTRL_CH_*` constants (EDGEAI-1515).
+- `ErrorKind::PermissionDenied` for `EACCES` and `EPERM` (EDGEAI-1515).
+- Examples `v4l2-devices` and `v4l2-controls`, and `scripts/ioctl-trace.sh` for the strace ABI check (EDGEAI-1515).
 - `queue`: indexed buffer queue over MMAP, DMABUF and USERPTR, single- and multi-planar. It covers `REQBUFS`, optional `CREATE_BUFS`, `QUERYBUF`, RAII `mmap`, `EXPBUF`, `QBUF`/`DQBUF`, and `STREAMON`/`STREAMOFF`, with per-index queued state kept in step with the kernel across threads, a `poll` wait with timeout, and a dequeue that never blocks. Dequeued buffers report the error and last flags, the timestamp clock and source, and per-plane payload. Buffer capabilities include orphaned-buffer support. `EINTR` is retried everywhere, and `ENODEV` maps to `Disconnected` (EDGEAI-1514).
 - `m2m`: the output and capture queues of a memory-to-memory device, with one wait for both queues and pending events (EDGEAI-1514).
 - `Error` and `ErrorKind` for the safe helpers (EDGEAI-1514).
 - `uapi`: `set_userptr` on `v4l2_buffer` and `v4l2_plane` (EDGEAI-1514).
 - CI: a `vivid` job runs the queue tests against `vivid` and `vim2m` on hosted runners (EDGEAI-1514).
+
+### Changed
+- `ErrorKind::Unsupported` also covers `ENODATA`, and `ErrorKind::InvalidArgument` also covers `ERANGE` (EDGEAI-1515).
 
 ## [0.1.0] - 2026-10-06
 

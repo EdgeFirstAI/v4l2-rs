@@ -429,6 +429,14 @@ pub const V4L2_EVENT_SRC_CH_RESOLUTION: u32 = 1;
 pub const V4L2_EVENT_SUB_FL_SEND_INITIAL: u32 = 1;
 /// `V4L2_EVENT_SUB_FL_ALLOW_FEEDBACK`.
 pub const V4L2_EVENT_SUB_FL_ALLOW_FEEDBACK: u32 = 2;
+/// `V4L2_EVENT_CTRL_CH_VALUE`: the control's value changed.
+pub const V4L2_EVENT_CTRL_CH_VALUE: u32 = 1;
+/// `V4L2_EVENT_CTRL_CH_FLAGS`: the control's flags changed.
+pub const V4L2_EVENT_CTRL_CH_FLAGS: u32 = 2;
+/// `V4L2_EVENT_CTRL_CH_RANGE`: the control's range changed.
+pub const V4L2_EVENT_CTRL_CH_RANGE: u32 = 4;
+/// `V4L2_EVENT_CTRL_CH_DIMENSIONS`: the control's dimensions changed.
+pub const V4L2_EVENT_CTRL_CH_DIMENSIONS: u32 = 8;
 
 // ---- Selection targets and flags -----------------------------------------------
 /// `V4L2_SEL_TGT_CROP`.
@@ -877,6 +885,41 @@ impl v4l2_event {
     /// `u.src_change.changes` for a `V4L2_EVENT_SOURCE_CHANGE` event.
     pub fn src_change(&self) -> u32 {
         u32::from_ne_bytes([self.u[0], self.u[1], self.u[2], self.u[3]])
+    }
+
+    /// `u.ctrl` for a `V4L2_EVENT_CTRL` event.
+    pub fn ctrl(&self) -> v4l2_event_ctrl {
+        // SAFETY: `u` is 64 bytes, larger than the 40-byte payload, and the
+        // read is unaligned-safe; every bit pattern is a valid value.
+        unsafe { std::ptr::read_unaligned(self.u.as_ptr().cast::<v4l2_event_ctrl>()) }
+    }
+}
+
+/// `struct v4l2_event_ctrl` (40 bytes), the payload of a `V4L2_EVENT_CTRL`
+/// event. `value` is the `{s32 value; s64 value64}` union as bytes; `_pad`
+/// is the tail padding the kernel's 8-byte alignment adds.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct v4l2_event_ctrl {
+    pub changes: u32,
+    pub type_: u32,
+    pub value: [u8; 8],
+    pub flags: u32,
+    pub minimum: i32,
+    pub maximum: i32,
+    pub step: i32,
+    pub default_value: i32,
+    pub _pad: u32,
+}
+
+impl v4l2_event_ctrl {
+    /// `value`, for 32-bit controls.
+    pub fn value(&self) -> i32 {
+        i32::from_ne_bytes([self.value[0], self.value[1], self.value[2], self.value[3]])
+    }
+    /// `value64`, for 64-bit controls.
+    pub fn value64(&self) -> i64 {
+        i64::from_ne_bytes(self.value)
     }
 }
 
@@ -1356,6 +1399,7 @@ const _: () = {
     assert!(size_of::<v4l2_event>() == 136);
     assert!(size_of::<v4l2_event_subscription>() == 32);
     assert!(size_of::<v4l2_event_src_change>() == 4);
+    assert!(size_of::<v4l2_event_ctrl>() == 40);
     assert!(size_of::<v4l2_rect>() == 16);
     assert!(size_of::<v4l2_selection>() == 64);
     assert!(size_of::<v4l2_encoder_cmd>() == 40);
@@ -1368,6 +1412,9 @@ const _: () = {
     assert!(offset_of!(v4l2_ext_control, u) == 12);
     assert!(offset_of!(v4l2_ext_controls, controls) == 24);
     assert!(offset_of!(v4l2_event, u) == 8);
+    assert!(offset_of!(v4l2_event_ctrl, value) == 8);
+    assert!(offset_of!(v4l2_event_ctrl, flags) == 16);
+    assert!(offset_of!(v4l2_event_ctrl, default_value) == 32);
     assert!(offset_of!(v4l2_event, pending) == 72);
     assert!(offset_of!(v4l2_event, timestamp) == 80);
     assert!(offset_of!(v4l2_query_ext_ctrl, minimum) == 40);
