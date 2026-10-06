@@ -735,6 +735,22 @@ pub struct v4l2_timecode {
     pub userbits: [u8; 4],
 }
 
+/// Reads a 32-bit member of an 8-byte `m` union. The member occupies the
+/// first four bytes in memory, which is the low half of the `u64` only on
+/// little-endian targets.
+fn union_get_u32(m: u64) -> u32 {
+    let b = m.to_ne_bytes();
+    u32::from_ne_bytes([b[0], b[1], b[2], b[3]])
+}
+
+/// Builds an 8-byte `m` union holding a 32-bit member, with the remaining
+/// bytes zeroed.
+fn union_set_u32(v: u32) -> u64 {
+    let mut b = [0u8; 8];
+    b[..4].copy_from_slice(&v.to_ne_bytes());
+    u64::from_ne_bytes(b)
+}
+
 /// `struct v4l2_plane` (64 bytes). `m` overlays the `{mem_offset:u32,
 /// userptr:unsigned long, fd:s32}` union as a single 8-byte slot.
 #[repr(C)]
@@ -757,11 +773,11 @@ impl Default for v4l2_plane {
 impl v4l2_plane {
     /// `m.mem_offset` — MMAP plane offset (set by QUERYBUF).
     pub fn mem_offset(&self) -> u32 {
-        self.m as u32
+        union_get_u32(self.m)
     }
     /// Set `m.fd` — import a dmabuf into this plane (DMABUF memory).
     pub fn set_fd(&mut self, fd: i32) {
-        self.m = fd as u32 as u64;
+        self.m = union_set_u32(fd as u32);
     }
 }
 
@@ -796,15 +812,15 @@ impl Default for v4l2_buffer {
 impl v4l2_buffer {
     /// Set `m.offset` — single-planar MMAP offset.
     pub fn set_offset(&mut self, offset: u32) {
-        self.m = offset as u64;
+        self.m = union_set_u32(offset);
     }
     /// `m.offset` — single-planar MMAP offset (from QUERYBUF).
     pub fn offset(&self) -> u32 {
-        self.m as u32
+        union_get_u32(self.m)
     }
     /// Set `m.fd` — single-planar dmabuf import.
     pub fn set_fd(&mut self, fd: i32) {
-        self.m = fd as u32 as u64;
+        self.m = union_set_u32(fd as u32);
     }
     /// Set `m.planes` — multi-planar plane array pointer. The pointed-to array
     /// must outlive the ioctl call.
@@ -1390,11 +1406,22 @@ mod tests {
         let mut buf = v4l2_buffer::default();
         buf.set_offset(0x1000);
         assert_eq!(buf.offset(), 0x1000);
+        assert_eq!(&buf.m.to_ne_bytes()[..4], &0x1000u32.to_ne_bytes());
         buf.set_fd(7);
-        assert_eq!(buf.m as u32 as i32, 7);
+        assert_eq!(
+            buf.m.to_ne_bytes(),
+            [7i32.to_ne_bytes(), [0; 4]].concat()[..],
+            "fd occupies the first four bytes of the union"
+        );
         let mut plane = v4l2_plane::default();
         plane.set_fd(-1);
-        assert_eq!(plane.m, 0xffff_ffff, "fd is a 32-bit member of the union");
+        assert_eq!(&plane.m.to_ne_bytes()[..4], &(-1i32).to_ne_bytes());
+        assert_eq!(&plane.m.to_ne_bytes()[4..], &[0; 4]);
+        plane.m = u64::from_ne_bytes([0x78, 0x56, 0x34, 0x12, 0xaa, 0xbb, 0xcc, 0xdd]);
+        assert_eq!(
+            plane.mem_offset(),
+            u32::from_ne_bytes([0x78, 0x56, 0x34, 0x12])
+        );
     }
 
     #[test]
