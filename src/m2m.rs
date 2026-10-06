@@ -83,10 +83,16 @@ impl M2m {
         (self.output, self.capture)
     }
 
-    /// Starts streaming on both queues, output first.
+    /// Starts streaming on both queues, output first. If the capture queue
+    /// fails to start, the output queue is stopped again before the error is
+    /// returned, so neither queue is left streaming.
     pub fn stream_on(&self) -> Result<()> {
         self.output.stream_on()?;
-        self.capture.stream_on()
+        if let Err(e) = self.capture.stream_on() {
+            let _ = self.output.stream_off();
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Stops streaming on both queues, capture first, and reclaims every

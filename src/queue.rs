@@ -42,14 +42,19 @@
 //!
 //! [`Queue::enqueue`], [`Queue::dequeue`], [`Queue::wait`],
 //! [`Queue::stream_on`] and [`Queue::stream_off`] take `&self` and may run on
-//! different threads: V4L2 serialises the ioctls in the kernel. Allocation
-//! and [`Queue::free`] take `&mut self`.
+//! different threads. The queue serialises the state-changing ioctls
+//! (`QBUF`, `DQBUF`, `STREAMON`, `STREAMOFF`) together with its own record of
+//! queued indices, so that record always follows the kernel's order.
+//! [`Queue::wait`] takes no lock, and [`Queue::dequeue`] never blocks, so a
+//! thread waiting for a frame never holds up one queueing a buffer.
+//! Allocation and [`Queue::free`] take `&mut self`.
 
 use std::ffi::c_void;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use nix::errno::Errno;
@@ -420,6 +425,7 @@ pub struct Queue {
     num_planes: usize,
     queued: Vec<AtomicBool>,
     streaming: AtomicBool,
+    ops: Mutex<()>,
 }
 
 impl Queue {
@@ -437,6 +443,7 @@ impl Queue {
             num_planes: 0,
             queued: Vec::new(),
             streaming: AtomicBool::new(false),
+            ops: Mutex::new(()),
         })
     }
 
@@ -493,35 +500,23 @@ impl Queue {
 
     /// Allocates `count` buffers of `memory` with `VIDIOC_REQBUFS` and
     /// returns the number the driver granted, which may differ. Any previous
-    /// buffers are released first. `count == 0` is the same as
-    /// [`Queue::free`].
+    /// buffers are released first, including buffers of another memory type.
+    /// `count == 0` is the same as [`Queue::free`].
     ///
     /// The plane sizes come from the format currently set on the device
-    /// (`VIDIOC_S_FMT`).
+    /// (`VIDIOC_S_FMT`). Fails with [`ErrorKind::InvalidState`] while
+    /// streaming.
     pub fn request(&mut self, memory: Memory, count: u32) -> Result<u32> {
+        if count == 0 {
+            return self.free().map(|()| 0);
+        }
         if self.is_streaming() {
             return Err(Error::new(ErrorKind::InvalidState, "VIDIOC_REQBUFS"));
         }
-        let mut rb = v4l2_requestbuffers {
-            count,
-            type_: self.buf_type.raw(),
-            memory: memory.raw(),
-            ..Default::default()
-        };
-        // SAFETY: valid fd; `rb` is initialised and outlives the call.
-        retry("VIDIOC_REQBUFS", || unsafe {
-            ioctl::vidioc_reqbufs(self.fd.as_raw_fd(), &mut rb)
-        })?;
-        self.capabilities = BufferCapabilities(rb.capabilities);
-        self.queued = (0..rb.count).map(|_| AtomicBool::new(false)).collect();
-        if rb.count == 0 {
-            self.memory = None;
-            self.num_planes = 0;
-        } else {
-            self.memory = Some(memory);
-            self.num_planes = self.query(0)?.planes.len();
+        if let Some(current) = self.memory.filter(|&m| m != memory) {
+            self.reqbufs(current, 0)?;
         }
-        Ok(rb.count)
+        self.reqbufs(memory, count)
     }
 
     /// Adds up to `count` buffers of `memory` sized for `format` with
@@ -564,14 +559,38 @@ impl Queue {
     }
 
     /// Stops streaming if needed and releases every buffer with
-    /// `VIDIOC_REQBUFS(0)`. Mapped and exported buffers stay valid where the
-    /// driver supports orphaned buffers (see the module documentation).
+    /// `VIDIOC_REQBUFS(0)` for the memory type in use. Mapped and exported
+    /// buffers stay valid where the driver supports orphaned buffers (see the
+    /// module documentation).
     pub fn free(&mut self) -> Result<()> {
         if self.is_streaming() {
             self.stream_off()?;
         }
         let memory = self.memory.unwrap_or(Memory::Mmap);
-        self.request(memory, 0).map(|_| ())
+        self.reqbufs(memory, 0).map(|_| ())
+    }
+
+    fn reqbufs(&mut self, memory: Memory, count: u32) -> Result<u32> {
+        let mut rb = v4l2_requestbuffers {
+            count,
+            type_: self.buf_type.raw(),
+            memory: memory.raw(),
+            ..Default::default()
+        };
+        // SAFETY: valid fd; `rb` is initialised and outlives the call.
+        retry("VIDIOC_REQBUFS", || unsafe {
+            ioctl::vidioc_reqbufs(self.fd.as_raw_fd(), &mut rb)
+        })?;
+        self.capabilities = BufferCapabilities(rb.capabilities);
+        self.queued = (0..rb.count).map(|_| AtomicBool::new(false)).collect();
+        if rb.count == 0 {
+            self.memory = None;
+            self.num_planes = 0;
+        } else {
+            self.memory = Some(memory);
+            self.num_planes = self.query(0)?.planes.len();
+        }
+        Ok(rb.count)
     }
 
     /// Reports buffer `index` with `VIDIOC_QUERYBUF`.
@@ -734,19 +753,25 @@ impl Queue {
     }
 
     /// Dequeues the next finished buffer with `VIDIOC_DQBUF`, or returns
-    /// `None` when none is ready. The device must have been opened with
-    /// `O_NONBLOCK` for this call not to block; use [`Queue::wait`] to sleep
-    /// until a buffer is ready.
+    /// `None` when none is ready. It never blocks, whether or not the device
+    /// was opened with `O_NONBLOCK`; use [`Queue::wait`] to sleep until a
+    /// buffer is ready.
     ///
     /// A buffer flagged [`BufferFlags::is_error`] is returned like any other.
     /// After the last buffer of a memory-to-memory drain the driver reports
     /// [`ErrorKind::EndOfStream`]. Fails with [`ErrorKind::InvalidState`]
     /// when no buffers are allocated or the queue is not streaming.
     pub fn dequeue(&self) -> Result<Option<Dequeued>> {
+        let _ops = self.lock();
         let memory = self
             .memory
             .filter(|_| self.is_streaming())
             .ok_or(Error::new(ErrorKind::InvalidState, "VIDIOC_DQBUF"))?;
+        // Only the lock holder dequeues, so a buffer `poll` reports as done is
+        // still there for `VIDIOC_DQBUF`, which therefore cannot block.
+        if !self.ready_now()? {
+            return Ok(None);
+        }
         let mut raw = RawBuffer::new(self.buf_type, memory.raw(), 0);
         let p = raw.prepare(self.buf_type, VIDEO_MAX_PLANES);
         // SAFETY: valid fd; `p` points into `raw`, which outlives the call.
@@ -796,6 +821,7 @@ impl Queue {
 
     /// Starts the stream with `VIDIOC_STREAMON`.
     pub fn stream_on(&self) -> Result<()> {
+        let _ops = self.lock();
         let t = self.buf_type.raw() as libc::c_int;
         // SAFETY: valid fd; `t` outlives the call.
         retry("VIDIOC_STREAMON", || unsafe {
@@ -809,6 +835,7 @@ impl Queue {
     /// queued buffer to the application, so all indices become free to
     /// enqueue again.
     pub fn stream_off(&self) -> Result<()> {
+        let _ops = self.lock();
         let t = self.buf_type.raw() as libc::c_int;
         // SAFETY: valid fd; `t` outlives the call.
         retry("VIDIOC_STREAMOFF", || unsafe {
@@ -829,13 +856,34 @@ impl Queue {
     /// error condition instead (typically: not streaming, or no buffer
     /// queued), and with [`ErrorKind::Disconnected`] when the device is gone.
     pub fn wait(&self, timeout: Option<Duration>) -> Result<bool> {
-        let ready = if self.buf_type.is_output() {
+        let ready = self.ready_flag();
+        let revents = poll_device(self.fd.as_fd(), ready, timeout)?;
+        Ok(revents.is_some_and(|r| r.intersects(ready)))
+    }
+
+    fn ready_flag(&self) -> PollFlags {
+        if self.buf_type.is_output() {
             PollFlags::POLLOUT
         } else {
             PollFlags::POLLIN
-        };
-        let revents = poll_device(self.fd.as_fd(), ready, timeout)?;
-        Ok(revents.is_some_and(|r| r.intersects(ready)))
+        }
+    }
+
+    /// Whether a buffer can be dequeued right now. An error condition from
+    /// `poll` (for example nothing queued) means nothing to dequeue.
+    fn ready_now(&self) -> Result<bool> {
+        let ready = self.ready_flag();
+        match poll_device(self.fd.as_fd(), ready, Some(Duration::ZERO)) {
+            Ok(r) => Ok(r.is_some_and(|r| r.intersects(ready))),
+            Err(e) if e.kind() == ErrorKind::InvalidState => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, ()> {
+        self.ops
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(crate) fn fd(&self) -> BorrowedFd<'_> {
@@ -884,10 +932,8 @@ impl Queue {
     fn queue_raw(&self, mut raw: RawBuffer, timestamp: Option<Duration>) -> Result<()> {
         let index = raw.buf.index;
         let slot = &self.queued[index as usize];
-        if slot
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
+        let _ops = self.lock();
+        if slot.load(Ordering::Acquire) {
             return Err(Error::new(ErrorKind::InvalidState, "VIDIOC_QBUF"));
         }
         if let Some(ts) = timestamp {
@@ -900,13 +946,11 @@ impl Queue {
         // SAFETY: valid fd; `p` points into `raw`, which outlives the call;
         // DMA-BUF descriptors are borrowed for the call and USERPTR memory is
         // guaranteed by the caller of `enqueue_userptr`.
-        let r = retry("VIDIOC_QBUF", || unsafe {
+        retry("VIDIOC_QBUF", || unsafe {
             ioctl::vidioc_qbuf(self.fd.as_raw_fd(), p)
-        });
-        if r.is_err() {
-            slot.store(false, Ordering::Release);
-        }
-        r.map(|_| ())
+        })?;
+        slot.store(true, Ordering::Release);
+        Ok(())
     }
 }
 

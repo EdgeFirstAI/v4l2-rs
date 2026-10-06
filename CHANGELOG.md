@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `queue`: indexed buffer queue over MMAP, DMABUF and USERPTR, single- and multi-planar. It covers `REQBUFS`, optional `CREATE_BUFS`, `QUERYBUF`, RAII `mmap`, `EXPBUF`, `QBUF`/`DQBUF`, and `STREAMON`/`STREAMOFF`, with per-index queued state and a `poll` wait with timeout. Dequeued buffers report the error and last flags, the timestamp clock and source, and per-plane payload. Buffer capabilities include orphaned-buffer support. `EINTR` is retried everywhere, and `ENODEV` maps to `Disconnected` (EDGEAI-1514).
+- `queue`: indexed buffer queue over MMAP, DMABUF and USERPTR, single- and multi-planar. It covers `REQBUFS`, optional `CREATE_BUFS`, `QUERYBUF`, RAII `mmap`, `EXPBUF`, `QBUF`/`DQBUF`, and `STREAMON`/`STREAMOFF`, with per-index queued state kept in step with the kernel across threads, a `poll` wait with timeout, and a dequeue that never blocks. Dequeued buffers report the error and last flags, the timestamp clock and source, and per-plane payload. Buffer capabilities include orphaned-buffer support. `EINTR` is retried everywhere, and `ENODEV` maps to `Disconnected` (EDGEAI-1514).
 - `m2m`: the output and capture queues of a memory-to-memory device, with one wait for both queues and pending events (EDGEAI-1514).
 - `Error` and `ErrorKind` for the safe helpers (EDGEAI-1514).
 - `uapi`: `set_userptr` on `v4l2_buffer` and `v4l2_plane` (EDGEAI-1514).

@@ -22,13 +22,13 @@ Before this crate existed, the codec carried a private copy of the UAPI structs 
 
 - **The queue owns a duplicate of the device descriptor.** V4L2 ties a queue to the open file rather than to the descriptor number, so a `dup` drives the caller's queue. Consumers keep their own handle, and no borrow lifetime runs through their types. The device closes when the last duplicate goes.
 - **Per-index state.** The queue records which indices the driver holds, from a successful `QBUF` until `DQBUF` returns the index, `STREAMOFF` reclaims it, or the buffers are freed. Queueing an index twice fails before reaching the driver.
-- **Threads.** Queueing, dequeueing, waiting and stream control take `&self`, so a buffer can be queued again from whichever thread drops its last user while another thread waits. Allocation and freeing take `&mut self`.
+- **Threads.** Queueing, dequeueing, waiting and stream control take `&self`, so a buffer can be queued again from whichever thread drops its last user while another thread waits. The state-changing ioctls (`QBUF`, `DQBUF`, `STREAMON`, `STREAMOFF`) and the queue's record of queued indices change together under one lock, so the record follows the kernel's order. Waiting takes no lock, and dequeueing checks readiness with a zero-timeout `poll` before `DQBUF`, so it never blocks, even on a descriptor opened without `O_NONBLOCK`. Allocation and freeing take `&mut self`. Switching memory types frees the old buffers first, and a zero-count request frees whatever is allocated.
 - **Memory ownership.**
   - **MMAP:** a `Mapping` keeps its pages until dropped. The kernel keeps a mapped buffer alive after `REQBUFS(0)`, so a mapping never points at freed memory.
   - **DMABUF import:** the kernel takes its own reference during `QBUF`, so the caller's descriptor may close straight after.
   - **DMABUF export:** an `EXPBUF` descriptor outlives the queue when the driver reports `V4L2_BUF_CAP_SUPPORTS_ORPHANED_BUFS`. Without it, `REQBUFS(0)` fails with `EBUSY` while an export is held. The camera SDK's close contract depends on this capability.
   - **USERPTR:** the memory must stay valid until the index comes back. The compiler cannot check that, so `enqueue_userptr` is the queue's one `unsafe` method.
-- **Errors.** Every failure carries an `ErrorKind` (`Disconnected` for `ENODEV` or `POLLHUP`, `Unsupported` for `ENOTTY`, `Busy`, `InvalidArgument`, `InvalidState`, `EndOfStream` for an M2M drain), the operation, and the `errno`. `EINTR` is retried everywhere, and `EAGAIN` from `DQBUF` means no buffer is ready.
+- **Errors.** Every failure carries an `ErrorKind` (`Disconnected` for `ENODEV` or `POLLHUP`, `Unsupported` for `ENOTTY`, `Busy`, `InvalidArgument`, `InvalidState`, `EndOfStream` for an M2M drain), the operation, and the `errno`. `EINTR` is retried everywhere.
 - **Allocation.** `REQBUFS` always works. `CREATE_BUFS` is optional, because the i.MX 8M Plus ISP driver returns `ENOTTY` for it.
 
 ## Rules

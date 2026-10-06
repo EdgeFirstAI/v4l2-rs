@@ -65,6 +65,18 @@ impl Device {
         })
     }
 
+    fn open_blocking(path: &str) -> std::io::Result<Self> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(path)?;
+        Ok(Self {
+            file,
+            path: path.to_owned(),
+        })
+    }
+
     fn lock(&self) {
         // SAFETY: valid fd.
         assert_eq!(
@@ -583,7 +595,8 @@ fn queue_state_errors() {
         "nothing can be dequeued before streaming"
     );
     q.stream_on().unwrap();
-    assert_eq!(q.dequeue().unwrap(), None, "no frame is ready immediately");
+    // Once streaming, dequeue succeeds whether or not a frame has arrived.
+    q.dequeue().unwrap();
     q.free().unwrap();
 }
 
@@ -669,4 +682,125 @@ fn m2m_round_trip_on_vim2m() {
     let (mut out, mut cap) = m2m.into_queues();
     out.free().unwrap();
     cap.free().unwrap();
+}
+
+#[test]
+fn request_switches_memory_type() {
+    let Some((dev, buf_type)) = vivid(false) else {
+        return;
+    };
+    let mut q = Queue::new(&dev, buf_type).unwrap();
+    q.request(Memory::Mmap, 2).unwrap();
+    assert_eq!(q.memory(), Some(Memory::Mmap));
+    let n = q.request(Memory::DmaBuf, 3).unwrap();
+    assert!(n >= 2);
+    assert_eq!(q.memory(), Some(Memory::DmaBuf));
+    assert_eq!(
+        q.request(Memory::Mmap, 0).unwrap(),
+        0,
+        "a zero count frees whatever memory type is allocated"
+    );
+    assert_eq!(q.memory(), None);
+    assert!(q.is_empty());
+}
+
+#[test]
+fn dequeue_never_blocks_on_a_blocking_descriptor() {
+    let Some((locked, buf_type)) = vivid(false) else {
+        return;
+    };
+    let dev = Device::open_blocking(&locked.path).unwrap();
+    drop(locked);
+    dev.lock();
+    let mut q = Queue::new(&dev, buf_type).unwrap();
+    let granted = q.request(Memory::Mmap, 2).unwrap();
+    for i in 0..granted {
+        q.enqueue(i, &[Plane::mmap()], None).unwrap();
+    }
+    q.stream_on().unwrap();
+    let t = std::time::Instant::now();
+    let _ = q.dequeue().unwrap();
+    assert!(
+        t.elapsed() < Duration::from_millis(20),
+        "dequeue blocked for {:?}",
+        t.elapsed()
+    );
+    next(&q);
+    q.free().unwrap();
+}
+
+/// One thread stops and restarts the stream and requeues everything while
+/// another dequeues and requeues frames. The kernel must never see an index
+/// queued twice, and the queue's record must match the kernel's afterwards.
+#[test]
+fn concurrent_stream_control_keeps_state_consistent() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let Some((dev, buf_type)) = vivid(false) else {
+        return;
+    };
+    let mut q = Queue::new(&dev, buf_type).unwrap();
+    let granted = q.request(Memory::Mmap, 4).unwrap();
+    for i in 0..granted {
+        q.enqueue(i, &[Plane::mmap()], None).unwrap();
+    }
+    q.stream_on().unwrap();
+
+    // Only state errors are expected from racing the two threads; anything
+    // else (in particular EINVAL from a double QBUF) is a bug.
+    let tolerate = |r: edgefirst_v4l2::Result<()>| {
+        if let Err(e) = r {
+            assert_eq!(e.kind(), ErrorKind::InvalidState, "{e}");
+        }
+    };
+    let done = AtomicBool::new(false);
+    let frames = std::thread::scope(|s| {
+        let consumer = s.spawn(|| {
+            let mut frames = 0;
+            while !done.load(Ordering::Acquire) {
+                match q.wait(Some(Duration::from_millis(20))) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => {
+                        assert_eq!(e.kind(), ErrorKind::InvalidState, "{e}");
+                        std::thread::yield_now();
+                        continue;
+                    }
+                }
+                match q.dequeue() {
+                    Ok(Some(d)) => {
+                        frames += 1;
+                        tolerate(q.enqueue(d.index, &[Plane::mmap()], None));
+                    }
+                    Ok(None) => {}
+                    Err(e) => assert_eq!(e.kind(), ErrorKind::InvalidState, "{e}"),
+                }
+            }
+            frames
+        });
+        for _ in 0..15 {
+            std::thread::sleep(Duration::from_millis(40));
+            q.stream_off().unwrap();
+            for i in 0..granted {
+                if !q.is_queued(i) {
+                    tolerate(q.enqueue(i, &[Plane::mmap()], None));
+                }
+            }
+            q.stream_on().unwrap();
+        }
+        done.store(true, Ordering::Release);
+        consumer.join().unwrap()
+    });
+    assert!(frames > 0, "no frames were captured while toggling");
+
+    for i in 0..granted {
+        let kernel =
+            q.query(i).unwrap().flags.raw() & (V4L2_BUF_FLAG_QUEUED | V4L2_BUF_FLAG_DONE) != 0;
+        assert_eq!(
+            q.is_queued(i),
+            kernel,
+            "index {i}: queue record disagrees with the kernel"
+        );
+    }
+    q.free().unwrap();
 }

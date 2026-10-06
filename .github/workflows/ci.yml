@@ -84,9 +84,9 @@ jobs:
   # Buffer-queue integration tests against the kernel's virtual drivers:
   # vivid (one single-planar and one multi-planar capture node) and vim2m
   # (memory-to-memory). The modules ship in linux-modules-extra for the
-  # runner's kernel. When the archive has not caught up with the runner image
-  # the job warns and skips the tests instead of failing; any other setup
-  # failure fails the job.
+  # runner's kernel. When the archive has no such package (it has not caught
+  # up with the runner image) the job warns and skips the tests; a failure to
+  # install a package that exists fails the job.
   vivid:
     name: V4L2 queues (vivid, vim2m)
     needs: changes
@@ -103,11 +103,13 @@ jobs:
           set -euo pipefail
           uname -r
           sudo apt-get update -q
-          if ! sudo apt-get install -y -q "linux-modules-extra-$(uname -r)"; then
-            echo "::warning::linux-modules-extra-$(uname -r) is not in the archive; vivid tests skipped"
+          pkg="linux-modules-extra-$(uname -r)"
+          if ! apt-cache show "$pkg" > /dev/null 2>&1; then
+            echo "::warning::$pkg is not in the archive; vivid tests skipped"
             echo "available=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          sudo apt-get install -y -q "$pkg"
           sudo modprobe vivid n_devs=2 node_types=0x1,0x1 multiplanar=1,2
           sudo modprobe vim2m
           # udev creates and permissions the nodes after modprobe returns;
