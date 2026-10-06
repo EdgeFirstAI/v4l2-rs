@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
 ### Added
 - `device`: `enumerate` lists `/dev/video*` in numeric order with each node's capabilities. `Device` opens a node and provides capabilities (honouring `V4L2_CAP_DEVICE_CAPS`, with the capture and output buffer types), formats, frame sizes and intervals, `G/S/TRY_FMT`, frame rate through `G/S_PARM`, and `G/S_SELECTION`. Setters return what the driver applied (EDGEAI-1515).
 - `controls`: enumeration with `QUERY_EXT_CTRL` (falling back to `QUERYCTRL`) and `QUERYMENU`, and typed get and set through `G/S_EXT_CTRLS`, including 64-bit, string and array or compound controls. `set` returns the value the driver applied (EDGEAI-1515).
@@ -30,5 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ioctl`: `nix` bindings for the 35 V4L2 ioctls the crate uses, with a test that checks every request number against the kernel header (EDGEAI-1513).
 - Repository setup: crate skeleton, CI tiers, release chain and project documentation (EDGEAI-1513).
 
-[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EdgeFirstAI/v4l2-rs/releases/tag/v0.1.0
