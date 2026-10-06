@@ -1,0 +1,17 @@
+[package]
+name = "edgefirst-v4l2"
+description = "Video4Linux2 UAPI definitions, ioctl wrappers, buffer queues, controls and enumeration"
+repository = "https://github.com/EdgeFirstAI/v4l2-rs"
+license = "Apache-2.0"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+readme = "README.md"
+keywords = ["v4l2", "video4linux", "camera", "codec", "linux"]
+categories = ["multimedia::video", "hardware-support", "os::linux-apis"]
+include = ["src/**", "tests/**", "examples/**", "LICENSE", "NOTICE", "README.md", "ARCHITECTURE.md", "TESTING.md"]
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unsafe_op_in_unsafe_fn = "deny"
