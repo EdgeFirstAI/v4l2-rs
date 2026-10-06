@@ -39,5 +39,11 @@ jobs:
       boards: camera-v4l2
       skip-macos: true
       skip-windows: true
-      sonar: false
+      # As in ci.yml: the hosted lanes load vivid and vim2m so their coverage
+      # includes the device tests, and the main-branch analysis is uploaded to
+      # SonarCloud. Pull requests are analysed by ci.yml's full tier.
+      pre-command: scripts/load-vivid.sh
+      board-pre-command: "true"
+      gpu-pre-command: "true"
+      sonar: true
     secrets: inherit
