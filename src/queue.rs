@@ -45,8 +45,9 @@
 //! different threads. The queue serialises the state-changing ioctls
 //! (`QBUF`, `DQBUF`, `STREAMON`, `STREAMOFF`) together with its own record of
 //! queued indices, so that record always follows the kernel's order.
-//! [`Queue::wait`] takes no lock, and [`Queue::dequeue`] never blocks, so a
-//! thread waiting for a frame never holds up one queueing a buffer.
+//! [`Queue::wait`] takes no lock, and [`Queue::dequeue`] does not wait for a
+//! buffer, so a thread waiting for a frame never holds up one queueing a
+//! buffer.
 //! Allocation and [`Queue::free`] take `&mut self`.
 
 use std::ffi::c_void;
@@ -753,9 +754,11 @@ impl Queue {
     }
 
     /// Dequeues the next finished buffer with `VIDIOC_DQBUF`, or returns
-    /// `None` when none is ready. It never blocks, whether or not the device
-    /// was opened with `O_NONBLOCK`; use [`Queue::wait`] to sleep until a
-    /// buffer is ready.
+    /// `None` when none is ready; use [`Queue::wait`] to sleep until a buffer
+    /// is ready. The readiness check and `VIDIOC_DQBUF` run under the queue's
+    /// lock, so it never blocks on a descriptor opened with `O_NONBLOCK`, nor
+    /// on a blocking one unless something outside this `Queue` dequeues the
+    /// same buffer type from the same open file concurrently.
     ///
     /// A buffer flagged [`BufferFlags::is_error`] is returned like any other.
     /// After the last buffer of a memory-to-memory drain the driver reports

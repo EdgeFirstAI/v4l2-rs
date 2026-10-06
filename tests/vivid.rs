@@ -1125,11 +1125,17 @@ mod device_controls_events {
             "nothing else pending"
         );
 
+        assert!(
+            !events::wait(&dev, Some(Duration::from_millis(50))).unwrap(),
+            "no event pending yet"
+        );
+
         // A second handle changes the control, as another process would.
         let other = open(&locked);
         for v in [start + 1, start + 2] {
             controls::set(&other, &b, &ControlValue::Integer(v)).unwrap();
         }
+        assert!(events::wait(&dev, Some(Duration::from_secs(1))).unwrap());
         let drained = events::drain(&dev, 16).unwrap();
         assert!(!drained.is_empty());
         let last = drained.last().unwrap().control().unwrap();
