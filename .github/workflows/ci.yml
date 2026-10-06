@@ -81,6 +81,60 @@ jobs:
     with:
       python: false
 
+  # Buffer-queue integration tests against the kernel's virtual drivers:
+  # vivid (one single-planar and one multi-planar capture node) and vim2m
+  # (memory-to-memory). The modules ship in linux-modules-extra for the
+  # runner's kernel. When the archive has no such package (it has not caught
+  # up with the runner image) the job warns and skips the tests; a failure to
+  # install a package that exists fails the job.
+  vivid:
+    name: V4L2 queues (vivid, vim2m)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read        # checkout
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Load vivid and vim2m
+        id: drivers
+        run: |
+          set -euo pipefail
+          uname -r
+          sudo apt-get update -q
+          pkg="linux-modules-extra-$(uname -r)"
+          if ! apt-cache show "$pkg" > /dev/null 2>&1; then
+            echo "::warning::$pkg is not in the archive; vivid tests skipped"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sudo apt-get install -y -q "$pkg"
+          sudo modprobe vivid n_devs=2 node_types=0x1,0x1 multiplanar=1,2
+          sudo modprobe vim2m
+          # udev creates and permissions the nodes after modprobe returns;
+          # wait for it, or it resets the modes changed below.
+          sudo udevadm settle
+          sudo chmod a+rw /dev/video* /dev/dma_heap/system
+          ls -l /dev/video* /dev/dma_heap/system
+          for d in /sys/class/video4linux/video*; do echo "$(basename "$d"): $(cat "$d/name")"; done
+          echo "available=true" >> "$GITHUB_OUTPUT"
+      # rust-toolchain.toml is the single source of the compiler version.
+      - name: Install the pinned toolchain
+        if: steps.drivers.outputs.available == 'true'
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+        if: steps.drivers.outputs.available == 'true'
+        with:
+          shared-key: vivid
+          cache-on-failure: true
+          cache-bin: false
+      - name: Queue tests
+        if: steps.drivers.outputs.available == 'true'
+        env:
+          EDGEFIRST_V4L2_REQUIRE_VIVID: "1"
+        run: cargo test --locked --test vivid
+
   full:
     needs: changes
     if: needs.changes.outputs.full == 'true' || needs.changes.outputs.hardware == 'true'
@@ -88,7 +142,8 @@ jobs:
     with:
       lanes: ${{ needs.changes.outputs.full == 'true' && 'all' || 'hardware' }}
       # Real V4L2 capture nodes (ISI and vvcam on i.MX 8M Plus) for the
-      # capture tests. M2M codec boards are added when the m2m helpers land.
+      # capture tests. M2M codec boards are added with device tests for the
+      # m2m helpers.
       boards: camera-v4l2
       # The crate is Linux-only and compiles to nothing elsewhere, so the
       # macOS and Windows lanes would build an empty crate.
@@ -100,7 +155,7 @@ jobs:
 
   ci-gate:
     if: always()
-    needs: [changes, quick, full]
+    needs: [changes, quick, vivid, full]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     # Reads its own `needs` context and nothing else.
