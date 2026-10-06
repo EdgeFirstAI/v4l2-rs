@@ -16,6 +16,21 @@ Before this crate existed, the codec carried a private copy of the UAPI structs 
 2. **`ioctl`:** one `nix` binding per ioctl. This is the only place request numbers are built.
 3. **Safe helpers:** `device`, `queue`, `controls`, `events` and `m2m`, written in safe Rust over the two layers above. Unsafe code is limited to the ioctl calls themselves and to `mmap`.
 
+## Buffer queues
+
+`queue::Queue` drives one buffer type of an open device. `m2m::M2m` pairs an output and a capture queue on one memory-to-memory node and waits on both, plus events, with a single `poll`.
+
+- **The queue owns a duplicate of the device descriptor.** V4L2 ties a queue to the open file rather than to the descriptor number, so a `dup` drives the caller's queue. Consumers keep their own handle, and no borrow lifetime runs through their types. The device closes when the last duplicate goes.
+- **Per-index state.** The queue records which indices the driver holds, from a successful `QBUF` until `DQBUF` returns the index, `STREAMOFF` reclaims it, or the buffers are freed. Queueing an index twice fails before reaching the driver.
+- **Threads.** Queueing, dequeueing, waiting and stream control take `&self`, so a buffer can be queued again from whichever thread drops its last user while another thread waits. Allocation and freeing take `&mut self`.
+- **Memory ownership.**
+  - **MMAP:** a `Mapping` keeps its pages until dropped. The kernel keeps a mapped buffer alive after `REQBUFS(0)`, so a mapping never points at freed memory.
+  - **DMABUF import:** the kernel takes its own reference during `QBUF`, so the caller's descriptor may close straight after.
+  - **DMABUF export:** an `EXPBUF` descriptor outlives the queue when the driver reports `V4L2_BUF_CAP_SUPPORTS_ORPHANED_BUFS`. Without it, `REQBUFS(0)` fails with `EBUSY` while an export is held. The camera SDK's close contract depends on this capability.
+  - **USERPTR:** the memory must stay valid until the index comes back. The compiler cannot check that, so `enqueue_userptr` is the queue's one `unsafe` method.
+- **Errors.** Every failure carries an `ErrorKind` (`Disconnected` for `ENODEV` or `POLLHUP`, `Unsupported` for `ENOTTY`, `Busy`, `InvalidArgument`, `InvalidState`, `EndOfStream` for an M2M drain), the operation, and the `errno`. `EINTR` is retried everywhere, and `EAGAIN` from `DQBUF` means no buffer is ready.
+- **Allocation.** `REQBUFS` always works. `CREATE_BUFS` is optional, because the i.MX 8M Plus ISP driver returns `ENOTTY` for it.
+
 ## Rules
 
 - **No EdgeFirst types.** Consumers translate buffers into tensors, images or anything else, so the crate can stay small and stable.

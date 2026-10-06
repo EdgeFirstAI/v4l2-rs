@@ -779,6 +779,10 @@ impl v4l2_plane {
     pub fn set_fd(&mut self, fd: i32) {
         self.m = union_set_u32(fd as u32);
     }
+    /// Set `m.userptr` — caller memory for this plane (USERPTR memory).
+    pub fn set_userptr(&mut self, ptr: *mut u8) {
+        self.m = ptr as usize as u64;
+    }
 }
 
 /// `struct v4l2_buffer` (88 bytes). `m` overlays the `{offset:u32,
@@ -821,6 +825,10 @@ impl v4l2_buffer {
     /// Set `m.fd` — single-planar dmabuf import.
     pub fn set_fd(&mut self, fd: i32) {
         self.m = union_set_u32(fd as u32);
+    }
+    /// Set `m.userptr` — single-planar caller memory (USERPTR memory).
+    pub fn set_userptr(&mut self, ptr: *mut u8) {
+        self.m = ptr as usize as u64;
     }
     /// Set `m.planes` — multi-planar plane array pointer. The pointed-to array
     /// must outlive the ioctl call.

@@ -13,7 +13,7 @@ include = ["src/**", "tests/**", "examples/**", "LICENSE", "NOTICE", "README.md"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.189"
-nix = { version = "0.31.3", features = ["ioctl"] }
+nix = { version = "0.31.3", features = ["ioctl", "mman", "poll"] }
 
 [lints.rust]
 missing_docs = "warn"
