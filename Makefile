@@ -1,6 +1,8 @@
 # edgefirst-v4l2 developer interface. CI runs the same checks through the
 # shared EdgeFirstAI/.github workflows pinned in .github/workflows/ci.yml.
 
+SHELL := /bin/bash
+
 .PHONY: help format lint build test sbom verify-version pre-release clean
 
 help: ## Show available targets (default)
@@ -15,7 +17,7 @@ lint: ## Run all linters with zero warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
 
 build: ## Build with coverage instrumentation
-	cargo llvm-cov --no-report build --locked
+	source <(cargo llvm-cov show-env --export-prefix) && cargo build --locked
 
 test: ## Run all tests with coverage
 	cargo llvm-cov --locked --lcov --output-path target/coverage.lcov
