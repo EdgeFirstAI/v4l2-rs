@@ -3,11 +3,11 @@
 
 //! V4L2 events: subscription and a dequeue that never blocks.
 //!
-//! Some drivers block in `VIDIOC_DQEVENT` when no event is pending, even on
-//! a non-blocking descriptor (the i.MX `mxc-jpeg` decoder does). Every
-//! dequeue here first checks `POLLPRI` with a zero timeout, and [`drain`]
-//! stops at the first event that reports nothing else pending, so neither
-//! can hang.
+//! On a descriptor opened without `O_NONBLOCK`, `VIDIOC_DQEVENT` sleeps until
+//! an event arrives, which can be forever (the i.MX `mxc-jpeg` decoder, with
+//! no source change pending). Every dequeue here first checks `POLLPRI` with
+//! a zero timeout, and [`drain`] stops at the first event that reports
+//! nothing else pending, so neither can hang, however the node was opened.
 
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::time::Duration;
@@ -144,6 +144,15 @@ pub fn unsubscribe(dev: impl AsFd, kind: u32, id: u32) -> Result<()> {
     .map(|_| ())
 }
 
+/// Waits up to `timeout` (forever when `None`) until an event is pending,
+/// and returns `false` on timeout. Unlike [`M2m::wait`](crate::m2m::M2m::wait),
+/// it ignores buffer readiness, so it can wait for a source change while
+/// buffers complete. Interrupted waits resume with the remaining time.
+pub fn wait(dev: impl AsFd, timeout: Option<Duration>) -> Result<bool> {
+    Ok(poll_device(dev.as_fd(), PollFlags::POLLPRI, timeout)?
+        .is_some_and(|r| r.contains(PollFlags::POLLPRI)))
+}
+
 /// Dequeues the next pending event, or returns `None` when there is none.
 /// Never blocks.
 pub fn dequeue(dev: impl AsFd) -> Result<Option<Event>> {
@@ -222,5 +231,13 @@ mod tests {
         let (r, _w) = nix::unistd::pipe().unwrap();
         assert!(dequeue(&r).unwrap().is_none());
         assert!(drain(&r, 8).unwrap().is_empty());
+    }
+
+    #[test]
+    fn wait_times_out_without_events() {
+        let (r, _w) = nix::unistd::pipe().unwrap();
+        let t = std::time::Instant::now();
+        assert!(!wait(&r, Some(Duration::from_millis(20))).unwrap());
+        assert!(t.elapsed() >= Duration::from_millis(20));
     }
 }

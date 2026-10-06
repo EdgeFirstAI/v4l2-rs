@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `events::wait`: waits for a pending event alone, ignoring buffer readiness, for example a source change while buffers complete (EDGEAI-1516).
+
+### Fixed
+- The `events` documentation said `mxc-jpeg` blocks in `VIDIOC_DQEVENT` even on a non-blocking descriptor. Measured on i.MX 95, it blocks only on a blocking one (EDGEAI-1516).
+
 ## [0.2.0] - 2026-10-06
 
 ### Added
