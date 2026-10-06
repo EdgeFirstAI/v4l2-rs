@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-06
+
 ### Added
 - `events::wait`: waits for a pending event alone, ignoring buffer readiness, for example a source change while buffers complete (EDGEAI-1516).
 
@@ -39,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ioctl`: `nix` bindings for the 35 V4L2 ioctls the crate uses, with a test that checks every request number against the kernel header (EDGEAI-1513).
 - Repository setup: crate skeleton, CI tiers, release chain and project documentation (EDGEAI-1513).
 
-[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EdgeFirstAI/v4l2-rs/releases/tag/v0.1.0
