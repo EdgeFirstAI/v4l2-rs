@@ -18,7 +18,11 @@ cargo clippy --all-targets --locked -- -D warnings
   ```
 
   The user needs read-write access to `/dev/video*` and `/dev/dma_heap/system` (usually the `video` group). Each test takes an exclusive `flock` on its node, so tests sharing a node run one at a time even under `cargo nextest`. Without the drivers the tests print `SKIPPED` and pass. Setting `EDGEFIRST_V4L2_REQUIRE_VIVID=1` makes a missing driver a failure; the CI `vivid` job sets it.
-- **CI:** the `vivid` job in `ci.yml` installs `linux-modules-extra` for the hosted `ubuntu-24.04` kernel, loads both drivers and runs the queue tests on every pull request. If the archive lacks modules for the runner's kernel, it warns and skips. Real capture and M2M drivers run on the EdgeFirst board fleet (`ci:hardware`).
+- **CI:** `scripts/load-vivid.sh` installs `linux-modules-extra` for the hosted runner's kernel and loads both drivers. If the archive lacks modules for that kernel, it warns and the device tests skip.
+  - The `vivid` job runs the device tests on every pull request.
+  - The full tier (`ci:full`) runs the script on its linux and linux-arm lanes, so their coverage includes the device tests. Real capture and M2M drivers run on the EdgeFirst board fleet (`ci:hardware`).
+  - The full tier merges the lcov of these lanes and the boards and uploads it to SonarCloud (`sonar-project.properties`).
+- **Coverage:** `make test` writes `target/coverage.lcov` with `cargo llvm-cov`; load the drivers first to include the device tests.
 - **ABI check (`scripts/ioctl-trace.sh`):** when moving V4L2 code between this crate and its consumers, the ioctl sequence must not change. Record the same workload before and after, then diff:
 
   ```bash
