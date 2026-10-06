@@ -369,7 +369,8 @@ impl Device {
     }
 
     /// The frame sizes supported for `fourcc`. Fails with
-    /// [`ErrorKind::Unsupported`] when the driver does not enumerate sizes.
+    /// [`ErrorKind::Unsupported`] when the driver does not enumerate sizes
+    /// for `fourcc` (including a format it does not offer).
     pub fn frame_sizes(&self, fourcc: u32) -> Result<FrameSizes> {
         let mut sizes = Vec::new();
         for index in 0.. {
@@ -384,6 +385,7 @@ impl Device {
             }) {
                 Ok(_) => {}
                 Err(err) if end_of_list(&err) && index > 0 => break,
+                Err(err) if end_of_list(&err) => return Err(err.with_kind(ErrorKind::Unsupported)),
                 Err(err) => return Err(err),
             }
             match e.type_ {
@@ -422,7 +424,8 @@ impl Device {
     }
 
     /// The frame intervals supported for `fourcc` at `size`. Fails with
-    /// [`ErrorKind::Unsupported`] when the driver does not enumerate them.
+    /// [`ErrorKind::Unsupported`] when the driver does not enumerate them
+    /// for that format and size (including one it does not offer).
     pub fn frame_intervals(&self, fourcc: u32, size: Size) -> Result<FrameIntervals> {
         let mut list = Vec::new();
         for index in 0.. {
@@ -439,6 +442,7 @@ impl Device {
             }) {
                 Ok(_) => {}
                 Err(err) if end_of_list(&err) && index > 0 => break,
+                Err(err) if end_of_list(&err) => return Err(err.with_kind(ErrorKind::Unsupported)),
                 Err(err) => return Err(err),
             }
             match e.type_ {

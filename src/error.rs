@@ -78,6 +78,11 @@ impl Error {
         }
     }
 
+    /// The same failure reported as `kind`, keeping the operation and errno.
+    pub(crate) fn with_kind(self, kind: ErrorKind) -> Self {
+        Self { kind, ..self }
+    }
+
     /// The category of the failure.
     pub fn kind(&self) -> ErrorKind {
         self.kind

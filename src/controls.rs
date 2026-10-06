@@ -127,6 +127,11 @@ impl ControlFlags {
     pub fn has_payload(self) -> bool {
         self.0 & V4L2_CTRL_FLAG_HAS_PAYLOAD != 0
     }
+    /// The array's length varies: `elems` is its current length and
+    /// `dims[0]` its largest (`V4L2_CTRL_FLAG_DYNAMIC_ARRAY`).
+    pub fn is_dynamic_array(self) -> bool {
+        self.0 & V4L2_CTRL_FLAG_DYNAMIC_ARRAY != 0
+    }
 }
 
 /// One item of a menu control, from `VIDIOC_QUERYMENU`.
@@ -161,7 +166,8 @@ pub struct ControlInfo {
     pub flags: ControlFlags,
     /// Size of one element in bytes.
     pub elem_size: u32,
-    /// Number of elements (1 for scalar controls).
+    /// Number of elements (1 for scalar controls). For a dynamic array, the
+    /// current number; `dims[0]` is the largest.
     pub elems: u32,
     /// Array dimensions (empty for scalar controls).
     pub dims: Vec<u32>,
@@ -171,8 +177,20 @@ pub struct ControlInfo {
 }
 
 impl ControlInfo {
+    /// Whether the value is passed through a buffer rather than inline:
+    /// strings, arrays and compound controls.
+    pub fn uses_payload(&self) -> bool {
+        self.flags.has_payload() || self.control_type == ControlType::String
+    }
+
+    /// Size in bytes of the full value buffer. A dynamic array's buffer holds
+    /// its largest length, `dims[0]` elements.
     fn payload_size(&self) -> usize {
-        self.elem_size as usize * self.elems.max(1) as usize
+        let elems = match self.dims.first() {
+            Some(&max) if self.flags.is_dynamic_array() => max,
+            _ => self.elems,
+        };
+        self.elem_size as usize * elems.max(1) as usize
     }
 }
 
@@ -185,7 +203,8 @@ pub enum ControlValue {
     Integer64(i64),
     /// String.
     String(String),
-    /// Raw bytes of an array or compound control, `elem_size * elems` long.
+    /// Raw bytes of an array or compound control: `elem_size * elems` long,
+    /// or for a dynamic array any whole number of elements up to `dims[0]`.
     Payload(Vec<u8>),
 }
 
@@ -223,7 +242,7 @@ pub fn query(dev: impl AsFd, id: u32) -> Result<ControlInfo> {
 pub fn get(dev: impl AsFd, info: &ControlInfo) -> Result<ControlValue> {
     let mut payload = vec![
         0u8;
-        if info.flags.has_payload() {
+        if info.uses_payload() {
             info.payload_size()
         } else {
             0
@@ -233,11 +252,15 @@ pub fn get(dev: impl AsFd, info: &ControlInfo) -> Result<ControlValue> {
         id: info.id,
         ..Default::default()
     };
-    if info.flags.has_payload() {
+    if info.uses_payload() {
         ctrl.size = payload.len() as u32;
         ctrl.set_ptr(payload.as_mut_ptr().cast());
     }
     ext_ctrls(dev.as_fd(), &mut ctrl, false)?;
+    if info.flags.is_dynamic_array() {
+        // The kernel reports the current length in `size`.
+        payload.truncate(ctrl.size as usize);
+    }
     Ok(decode(info, &ctrl, payload))
 }
 
@@ -247,7 +270,8 @@ pub fn get(dev: impl AsFd, info: &ControlInfo) -> Result<ControlValue> {
 /// The value's variant must suit the control type: [`ControlValue::Integer64`]
 /// for 64-bit controls, [`ControlValue::String`] for strings,
 /// [`ControlValue::Payload`] of exactly `elem_size * elems` bytes for array
-/// and compound controls, and [`ControlValue::Integer`] otherwise.
+/// and compound controls (for a dynamic array, a whole number of elements up
+/// to `dims[0]`), and [`ControlValue::Integer`] otherwise.
 pub fn set(dev: impl AsFd, info: &ControlInfo, value: &ControlValue) -> Result<ControlValue> {
     let invalid = || Error::new(ErrorKind::InvalidArgument, "VIDIOC_S_EXT_CTRLS");
     let mut ctrl = v4l2_ext_control {
@@ -264,20 +288,24 @@ pub fn set(dev: impl AsFd, info: &ControlInfo, value: &ControlValue) -> Result<C
             }
             payload[..s.len()].copy_from_slice(s.as_bytes());
         }
-        (_, ControlValue::Payload(bytes)) if info.flags.has_payload() => {
-            if bytes.len() != info.payload_size() {
+        (t, ControlValue::Payload(bytes)) if info.uses_payload() && t != ControlType::String => {
+            let fits = if info.flags.is_dynamic_array() {
+                let elem = (info.elem_size as usize).max(1);
+                bytes.len() <= info.payload_size() && bytes.len() % elem == 0
+            } else {
+                bytes.len() == info.payload_size()
+            };
+            if !fits {
                 return Err(invalid());
             }
             payload.clone_from(bytes);
         }
-        (t, ControlValue::Integer(v))
-            if !info.flags.has_payload() && t != ControlType::Integer64 =>
-        {
+        (t, ControlValue::Integer(v)) if !info.uses_payload() && t != ControlType::Integer64 => {
             ctrl.set_value(*v);
         }
         _ => return Err(invalid()),
     }
-    if info.flags.has_payload() {
+    if info.uses_payload() {
         ctrl.size = payload.len() as u32;
         ctrl.set_ptr(payload.as_mut_ptr().cast());
     }
@@ -315,7 +343,7 @@ fn decode(info: &ControlInfo, ctrl: &v4l2_ext_control, payload: Vec<u8>) -> Cont
     match info.control_type {
         ControlType::Integer64 => ControlValue::Integer64(ctrl.value64()),
         ControlType::String => ControlValue::String(c_string(&payload)),
-        _ if info.flags.has_payload() => ControlValue::Payload(payload),
+        _ if info.uses_payload() => ControlValue::Payload(payload),
         _ => ControlValue::Integer(ctrl.value()),
     }
 }
@@ -356,8 +384,25 @@ fn query_legacy(fd: std::os::fd::BorrowedFd<'_>, id: u32) -> Result<ControlInfo>
     retry("VIDIOC_QUERYCTRL", || unsafe {
         ioctl::vidioc_queryctrl(fd.as_raw_fd(), &mut q)
     })?;
+    let mut info = legacy_info(&q);
+    info.menu = menu_items(fd, &info)?;
+    Ok(info)
+}
+
+/// A `ControlInfo` from `VIDIOC_QUERYCTRL`, which reports no element size:
+/// strings hold `maximum` characters plus a NUL, and are passed by pointer
+/// whether or not the driver sets `V4L2_CTRL_FLAG_HAS_PAYLOAD`.
+fn legacy_info(q: &v4l2_queryctrl) -> ControlInfo {
     let control_type = ControlType::from_raw(q.type_);
-    let mut info = ControlInfo {
+    let (elem_size, flags) = match control_type {
+        ControlType::Integer64 => (8, q.flags),
+        ControlType::String => (
+            u32::try_from(q.maximum).unwrap_or(0).saturating_add(1),
+            q.flags | V4L2_CTRL_FLAG_HAS_PAYLOAD,
+        ),
+        _ => (4, q.flags),
+    };
+    ControlInfo {
         id: q.id,
         name: c_string(&q.name),
         control_type,
@@ -365,18 +410,12 @@ fn query_legacy(fd: std::os::fd::BorrowedFd<'_>, id: u32) -> Result<ControlInfo>
         maximum: i64::from(q.maximum),
         step: u64::try_from(q.step).unwrap_or(0),
         default_value: i64::from(q.default_value),
-        flags: ControlFlags(q.flags),
-        elem_size: if control_type == ControlType::Integer64 {
-            8
-        } else {
-            4
-        },
+        flags: ControlFlags(flags),
+        elem_size,
         elems: 1,
         dims: Vec::new(),
         menu: Vec::new(),
-    };
-    info.menu = menu_items(fd, &info)?;
-    Ok(info)
+    }
 }
 
 fn query_all_legacy(fd: std::os::fd::BorrowedFd<'_>) -> Result<Vec<ControlInfo>> {
@@ -501,5 +540,49 @@ mod tests {
         assert!(set(&dev, &int, &ControlValue::Integer(3))
             .unwrap_err()
             .is_unsupported());
+    }
+
+    #[test]
+    fn dynamic_arrays_accept_whole_elements_up_to_capacity() {
+        let dev = std::fs::File::open("/dev/null").unwrap();
+        // Currently one element long, with room for eight.
+        let mut dynamic = info(
+            ControlType::U16,
+            V4L2_CTRL_FLAG_HAS_PAYLOAD | V4L2_CTRL_FLAG_DYNAMIC_ARRAY,
+            2,
+            1,
+        );
+        dynamic.dims = vec![8];
+        let reaches_driver = |len: usize| {
+            set(&dev, &dynamic, &ControlValue::Payload(vec![0; len]))
+                .unwrap_err()
+                .is_unsupported()
+        };
+        assert!(reaches_driver(0));
+        assert!(reaches_driver(6), "fewer elements than the capacity");
+        assert!(reaches_driver(16), "the full capacity");
+        assert!(!reaches_driver(17), "more than the capacity");
+        assert!(!reaches_driver(5), "not a whole number of elements");
+    }
+
+    #[test]
+    fn legacy_strings_are_sized_for_their_nul() {
+        let mut q = v4l2_queryctrl {
+            id: 0x0098_f905,
+            type_: V4L2_CTRL_TYPE_STRING,
+            maximum: 31,
+            ..Default::default()
+        };
+        let s = legacy_info(&q);
+        assert_eq!(s.elem_size, 32);
+        assert!(s.uses_payload() && s.flags.has_payload());
+        assert_eq!(s.payload_size(), 32);
+
+        q.type_ = V4L2_CTRL_TYPE_INTEGER64;
+        assert_eq!(legacy_info(&q).elem_size, 8);
+        q.type_ = V4L2_CTRL_TYPE_INTEGER;
+        let i = legacy_info(&q);
+        assert_eq!(i.elem_size, 4);
+        assert!(!i.uses_payload());
     }
 }

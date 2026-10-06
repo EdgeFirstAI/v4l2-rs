@@ -886,6 +886,24 @@ mod device_controls_events {
     }
 
     #[test]
+    fn enumerating_an_unoffered_format_is_unsupported() {
+        let Some((locked, _)) = vivid(false) else {
+            return;
+        };
+        let dev = open(&locked);
+        let h264 = fourcc(b'H', b'2', b'6', b'4');
+        let e = dev.frame_sizes(h264).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::Unsupported, "{e}");
+        assert_eq!(e.errno(), Some(nix::errno::Errno::EINVAL));
+        let odd = device::Size {
+            width: 1234,
+            height: 567,
+        };
+        let e = dev.frame_intervals(V4L2_PIX_FMT_YUYV, odd).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::Unsupported, "{e}");
+    }
+
+    #[test]
     fn set_format_reports_what_the_driver_applied() {
         let Some((locked, buf_type)) = vivid(false) else {
             return;
@@ -1043,6 +1061,28 @@ mod device_controls_events {
             controls::get(&dev, array).unwrap(),
             ControlValue::Payload(pattern)
         );
+
+        match all
+            .iter()
+            .find(|c| c.flags.is_dynamic_array() && writable(c))
+        {
+            Some(dynamic) => {
+                assert_eq!(dynamic.control_type, ControlType::U32);
+                // Two in-range elements, each a native-endian u32.
+                let two: Vec<u8> = [dynamic.minimum, dynamic.maximum]
+                    .iter()
+                    .flat_map(|&v| (v as u32).to_ne_bytes())
+                    .collect();
+                assert!(dynamic.dims.first().is_some_and(|&max| max >= 2));
+                controls::set(&dev, dynamic, &ControlValue::Payload(two.clone())).unwrap();
+                assert_eq!(
+                    controls::get(&dev, dynamic).unwrap(),
+                    ControlValue::Payload(two),
+                    "get returns the current length, not the capacity"
+                );
+            }
+            None => eprintln!("NOTE: this vivid has no dynamic-array control"),
+        }
 
         let button = first(&all, |c| c.control_type == ControlType::Button);
         assert_eq!(
