@@ -51,6 +51,8 @@ jobs:
               - 'Cargo.*'
               - 'rust-toolchain.toml'
               - 'deny.toml'
+              - 'scripts/**'
+              - 'sonar-project.properties'
               - '.github/**'
       - id: mode
         env:
@@ -82,12 +84,8 @@ jobs:
       python: false
 
   # Integration tests (queues, devices, controls, events) against the
-  # kernel's virtual drivers:
-  # vivid (one single-planar and one multi-planar capture node) and vim2m
-  # (memory-to-memory). The modules ship in linux-modules-extra for the
-  # runner's kernel. When the archive has no such package (it has not caught
-  # up with the runner image) the job warns and skips the tests; a failure to
-  # install a package that exists fails the job.
+  # kernel's virtual drivers, loaded by scripts/load-vivid.sh. When the archive
+  # has no modules for the runner's kernel the job warns and skips the tests.
   vivid:
     name: V4L2 devices (vivid, vim2m)
     needs: changes
@@ -100,26 +98,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Load vivid and vim2m
         id: drivers
-        run: |
-          set -euo pipefail
-          uname -r
-          sudo apt-get update -q
-          pkg="linux-modules-extra-$(uname -r)"
-          if ! apt-cache show "$pkg" > /dev/null 2>&1; then
-            echo "::warning::$pkg is not in the archive; vivid tests skipped"
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          sudo apt-get install -y -q "$pkg"
-          sudo modprobe vivid n_devs=2 node_types=0x1,0x1 multiplanar=1,2
-          sudo modprobe vim2m
-          # udev creates and permissions the nodes after modprobe returns;
-          # wait for it, or it resets the modes changed below.
-          sudo udevadm settle
-          sudo chmod a+rw /dev/video* /dev/dma_heap/system
-          ls -l /dev/video* /dev/dma_heap/system
-          for d in /sys/class/video4linux/video*; do echo "$(basename "$d"): $(cat "$d/name")"; done
-          echo "available=true" >> "$GITHUB_OUTPUT"
+        run: scripts/load-vivid.sh
       # rust-toolchain.toml is the single source of the compiler version.
       - name: Install the pinned toolchain
         if: steps.drivers.outputs.available == 'true'
@@ -150,8 +129,15 @@ jobs:
       # macOS and Windows lanes would build an empty crate.
       skip-macos: true
       skip-windows: true
-      # No SonarCloud project yet.
-      sonar: false
+      # The hosted linux and linux-arm lanes load vivid and vim2m, so their
+      # coverage includes the device tests. The boards and GPU hosts are
+      # self-hosted with their own drivers, and the hook would otherwise fall
+      # back to pre-command there.
+      pre-command: scripts/load-vivid.sh
+      board-pre-command: "true"
+      gpu-pre-command: "true"
+      # Uploads the merged lcov of the host lanes and the camera-v4l2 boards.
+      sonar: true
     secrets: inherit
 
   ci-gate:
