@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `uapi`: `V4L2_PIX_FMT_RGBA32` (`AB24`) and `V4L2_PIX_FMT_NV16M` (`NM16`), which `edgefirst-camera` defined for itself (EDGEAI-2203).
+- `tests/uapi_headers.rs` compares every `uapi` constant with the installed kernel headers and fails when a constant is left out of the check. CI requires it through `EDGEFIRST_V4L2_REQUIRE_UAPI_HEADERS` in a new `uapi-headers` job (EDGEAI-2203).
+
 ## [0.2.1] - 2026-10-06
 
 ### Added
