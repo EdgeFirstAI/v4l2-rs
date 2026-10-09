@@ -5,7 +5,8 @@
 //!
 //! Everything here mirrors `linux/videodev2.h` and `linux/v4l2-controls.h`
 //! byte for byte. The constant values were generated from those headers, and
-//! every struct carries compile-time `size_of` and `align_of` assertions, plus
+//! `tests/uapi_headers.rs` compares each one with the installed headers. Every
+//! struct carries compile-time `size_of` and `align_of` assertions, plus
 //! `offset_of` assertions for its unions, checked against the headers on
 //! x86_64 and aarch64. The ioctl request number is derived from `sizeof`, so a
 //! layout mistake would otherwise surface only as a runtime `ENOTTY` or a
@@ -509,6 +510,8 @@ pub const V4L2_PIX_FMT_ARGB32: u32 = fourcc(b'B', b'A', b'2', b'4');
 pub const V4L2_PIX_FMT_XBGR32: u32 = fourcc(b'X', b'R', b'2', b'4');
 /// `V4L2_PIX_FMT_ABGR32` (FourCC `AR24`).
 pub const V4L2_PIX_FMT_ABGR32: u32 = fourcc(b'A', b'R', b'2', b'4');
+/// `V4L2_PIX_FMT_RGBA32` (FourCC `AB24`).
+pub const V4L2_PIX_FMT_RGBA32: u32 = fourcc(b'A', b'B', b'2', b'4');
 /// `V4L2_PIX_FMT_YUYV` (FourCC `YUYV`).
 pub const V4L2_PIX_FMT_YUYV: u32 = fourcc(b'Y', b'U', b'Y', b'V');
 /// `V4L2_PIX_FMT_UYVY` (FourCC `UYVY`).
@@ -535,6 +538,8 @@ pub const V4L2_PIX_FMT_NV24: u32 = fourcc(b'N', b'V', b'2', b'4');
 pub const V4L2_PIX_FMT_NV12M: u32 = fourcc(b'N', b'M', b'1', b'2');
 /// `V4L2_PIX_FMT_NV21M` (FourCC `NM21`).
 pub const V4L2_PIX_FMT_NV21M: u32 = fourcc(b'N', b'M', b'2', b'1');
+/// `V4L2_PIX_FMT_NV16M` (FourCC `NM16`).
+pub const V4L2_PIX_FMT_NV16M: u32 = fourcc(b'N', b'M', b'1', b'6');
 /// `V4L2_PIX_FMT_YUV420` (FourCC `YU12`).
 pub const V4L2_PIX_FMT_YUV420: u32 = fourcc(b'Y', b'U', b'1', b'2');
 /// `V4L2_PIX_FMT_YUV420M` (FourCC `YM12`).
