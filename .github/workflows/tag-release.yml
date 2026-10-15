@@ -8,7 +8,7 @@ on:
 jobs:
   tag:
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
-    uses: EdgeFirstAI/.github/.github/workflows/tag-release.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    uses: EdgeFirstAI/.github/.github/workflows/tag-release.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
     with:
       # No tag unless the release build is green for the release-branch head
       # being merged -- the PR's head SHA, which is where the build ran, not

@@ -13,7 +13,7 @@ on:
 
 jobs:
   changed:
-    uses: EdgeFirstAI/.github/.github/workflows/nightly-gate.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    uses: EdgeFirstAI/.github/.github/workflows/nightly-gate.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
     with:
       # `inputs` is null on a schedule trigger, so the fallback is required;
       # without it the expression yields an empty string and the gate's
@@ -26,12 +26,12 @@ jobs:
   # Cargo.lock without building, on a free standard runner, so running it
   # every night costs nothing.
   advisories:
-    uses: EdgeFirstAI/.github/.github/workflows/advisories.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    uses: EdgeFirstAI/.github/.github/workflows/advisories.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
 
   nightly:
     needs: changed
     if: needs.changed.outputs.run == 'true'
-    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
     with:
       lanes: all
       nightly: true

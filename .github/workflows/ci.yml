@@ -79,7 +79,7 @@ jobs:
   quick:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    uses: EdgeFirstAI/.github/.github/workflows/rust-quick.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    uses: EdgeFirstAI/.github/.github/workflows/rust-quick.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
     with:
       python: false
 
@@ -118,7 +118,7 @@ jobs:
   full:
     needs: changes
     if: needs.changes.outputs.full == 'true' || needs.changes.outputs.hardware == 'true'
-    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@55bc02295af9878e74007b5f9e00fffbffcff62e  # v2.1.0
+    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
     with:
       lanes: ${{ needs.changes.outputs.full == 'true' && 'all' || 'hardware' }}
       # Real V4L2 capture nodes (ISI and vvcam on i.MX 8M Plus) for the
