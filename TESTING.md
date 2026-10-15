@@ -6,6 +6,12 @@ cargo clippy --all-targets --locked -- -D warnings
 ```
 
 - **UAPI layout:** the size assertions in `uapi` are checked at compile time, so `cargo build` on x86_64 and aarch64 Linux is itself a test of the ABI.
+- **UAPI constants (`tests/uapi_headers.rs`):** compiles a C program with the system `cc` that includes `<linux/videodev2.h>` and `<linux/v4l2-controls.h>`, and compares every `pub const` in `uapi` with the value the headers give. A second test fails when `src/uapi.rs` declares a constant the check does not list, so add each new constant to `CONSTANTS` in the test. Without `cc` or the headers (`linux-libc-dev` on Debian and Ubuntu) the comparison prints `SKIPPED` and passes; a name the installed headers lack prints a warning. Setting `EDGEFIRST_V4L2_REQUIRE_UAPI_HEADERS=1` makes all three a failure; the CI `uapi-headers` job sets it.
+
+  ```bash
+  EDGEFIRST_V4L2_REQUIRE_UAPI_HEADERS=1 cargo test --locked --test uapi_headers -- --nocapture
+  ```
+
 - **Device tests (`tests/vivid.rs`):** these run against the kernel's virtual drivers: `vivid` for capture (single- and multi-planar) and `vim2m` for memory-to-memory.
   - **Queues:** MMAP, DMABUF from the system DMA heap and USERPTR; `EXPBUF` with orphaned buffers; `CREATE_BUFS`; restart after `STREAMOFF`; switching memory types; concurrent stream control; state errors; an M2M round trip with timestamp copy.
   - **Devices:** numeric enumeration, capabilities and buffer types, formats, frame sizes and intervals, `TRY_FMT`/`S_FMT`, frame rate, and selection where the input supports it.
@@ -19,7 +25,7 @@ cargo clippy --all-targets --locked -- -D warnings
 
   The user needs read-write access to `/dev/video*` and `/dev/dma_heap/system` (usually the `video` group). Each test takes an exclusive `flock` on its node, so tests sharing a node run one at a time even under `cargo nextest`. Without the drivers the tests print `SKIPPED` and pass. Setting `EDGEFIRST_V4L2_REQUIRE_VIVID=1` makes a missing driver a failure; the CI `vivid` job sets it.
 - **CI:** `scripts/load-vivid.sh` installs `linux-modules-extra` for the hosted runner's kernel and loads both drivers. If the archive lacks modules for that kernel, it warns and the device tests skip.
-  - The `vivid` job runs the device tests on every pull request.
+  - The `vivid` job runs the device tests on every pull request, and the `uapi-headers` job checks the constants against the runner's kernel headers.
   - The full tier (`ci:full`) runs the script on its linux and linux-arm lanes, so their coverage includes the device tests. Real capture and M2M drivers run on the EdgeFirst board fleet (`ci:hardware`).
   - The full tier merges the lcov of these lanes and the boards and uploads it to SonarCloud (`sonar-project.properties`).
 - **Coverage:** `make test` writes `target/coverage.lcov` with `cargo llvm-cov`; load the drivers first to include the device tests.

@@ -115,6 +115,31 @@ jobs:
           EDGEFIRST_V4L2_REQUIRE_VIVID: "1"
         run: cargo test --locked --test vivid
 
+  # Compares every uapi constant with the runner's linux-libc-dev headers.
+  # The require gate turns a missing compiler, missing headers or a name the
+  # headers lack into a failure instead of a skip.
+  uapi-headers:
+    name: UAPI constants (kernel headers)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read        # checkout
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Install the pinned toolchain
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+        with:
+          shared-key: uapi-headers
+          cache-on-failure: true
+          cache-bin: false
+      - name: Check uapi constants against the kernel headers
+        env:
+          EDGEFIRST_V4L2_REQUIRE_UAPI_HEADERS: "1"
+        run: cargo test --locked --test uapi_headers -- --nocapture
+
   full:
     needs: changes
     if: needs.changes.outputs.full == 'true' || needs.changes.outputs.hardware == 'true'
@@ -142,7 +167,7 @@ jobs:
 
   ci-gate:
     if: always()
-    needs: [changes, quick, vivid, full]
+    needs: [changes, quick, vivid, uapi-headers, full]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     # Reads its own `needs` context and nothing else.
