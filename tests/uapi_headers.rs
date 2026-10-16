@@ -19,7 +19,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[allow(clippy::wildcard_imports)]
@@ -427,14 +427,26 @@ fn build(dir: &Path, absent: &BTreeSet<String>) -> Build {
     Build::Undeclared(names)
 }
 
+/// A directory for the C program on the machine running the test.
+/// `CARGO_TARGET_TMPDIR` is a path on the build host, which a test archive
+/// run on a board does not have.
+fn scratch_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("edgefirst-v4l2-uapi-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create the scratch directory");
+    dir
+}
+
 #[test]
 fn uapi_constants_match_kernel_headers() {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let dir = &scratch_dir();
     let mut absent = BTreeSet::new();
     loop {
         match build(dir, &absent) {
             Build::Built => break,
-            Build::NoCompiler(why) | Build::NoHeaders(why) => return skip(&why),
+            Build::NoCompiler(why) | Build::NoHeaders(why) => {
+                let _ = std::fs::remove_dir_all(dir);
+                return skip(&why);
+            }
             Build::Undeclared(names) => absent.extend(names),
         }
     }
@@ -442,6 +454,7 @@ fn uapi_constants_match_kernel_headers() {
     let out = Command::new(dir.join("uapi_headers"))
         .output()
         .expect("run the C program");
+    let _ = std::fs::remove_dir_all(dir);
     assert!(out.status.success(), "the C program failed: {out:?}");
     let stdout = String::from_utf8(out.stdout).expect("ASCII output");
     let header: BTreeMap<&str, &str> = stdout.lines().filter_map(|l| l.split_once(' ')).collect();
