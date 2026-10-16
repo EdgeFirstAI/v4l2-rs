@@ -30,7 +30,7 @@ jobs:
   # the branch name, plus the changelog section publish.yml will need, plus the
   # full SBOM. Fails the release PR rather than the tag.
   verify:
-    uses: EdgeFirstAI/.github/.github/workflows/release-rust.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
+    uses: EdgeFirstAI/.github/.github/workflows/release-rust.yml@9e296f92996b38683c684b9091ed59cb27562770  # v2.3.0
     with:
       sbom: true
       # Package NAMES the release ships, in dependency order. The list is
