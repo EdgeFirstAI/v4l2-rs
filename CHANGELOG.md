@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-16
+
 ### Added
 - `uapi`: `V4L2_PIX_FMT_RGBA32` (`AB24`) and `V4L2_PIX_FMT_NV16M` (`NM16`), which `edgefirst-camera` defined for itself (EDGEAI-2203).
 - `uapi`: `V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR`, the H.264 encoder header control that drivers such as Wave6 offer instead of `REPEAT_SEQ_HEADER`, and the `V4L2_MPEG_VIDEO_H264_PROFILE_*` and `V4L2_MPEG_VIDEO_H264_LEVEL_*` menu values (EDGEAI-1522).
@@ -46,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ioctl`: `nix` bindings for the 35 V4L2 ioctls the crate uses, with a test that checks every request number against the kernel header (EDGEAI-1513).
 - Repository setup: crate skeleton, CI tiers, release chain and project documentation (EDGEAI-1513).
 
-[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EdgeFirstAI/v4l2-rs/releases/tag/v0.1.0
