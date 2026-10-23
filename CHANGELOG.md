@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-23
+
 ### Added
 - `uapi`: `V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE` and `V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE`, the encoder rate-control switches. The i.MX 8M Plus `vsi_v4l2` encoder leaves both off, and encodes every frame at a fixed QP, unless they are set (EDGEAI-2362).
 
@@ -51,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ioctl`: `nix` bindings for the 35 V4L2 ioctls the crate uses, with a test that checks every request number against the kernel header (EDGEAI-1513).
 - Repository setup: crate skeleton, CI tiers, release chain and project documentation (EDGEAI-1513).
 
-[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/EdgeFirstAI/v4l2-rs/compare/v0.1.0...v0.2.0
