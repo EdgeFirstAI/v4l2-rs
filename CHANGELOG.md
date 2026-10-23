@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `uapi`: `V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE` and `V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE`, the encoder rate-control switches. The i.MX 8M Plus `vsi_v4l2` encoder leaves both off, and encodes every frame at a fixed QP, unless they are set (EDGEAI-2362).
+
 ## [0.2.2] - 2026-10-16
 
 ### Added
